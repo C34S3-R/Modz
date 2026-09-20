@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vehicle Lab</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <button id="menu-btn" aria-label="Toggle navigation">
+      <span></span><span></span><span></span>
+    </button>
+
+    <aside id="sidebar">
+      <div class="sidebar-head">
+        <div class="logo">VEHICLE LAB</div>
+        <div class="logo-sub">VEHICLE SERVER</div>
+      </div>
+
+      <nav id="nav">
+        <a href="#/dashboard" data-route="dashboard" class="active">Dashboard</a>
+        <a href="#/projects" data-route="projects">Projects</a>
+        <a href="#/processing" data-route="processing">Processing</a>
+        <a href="#/preview" data-route="preview">3D Preview</a>
+        <a href="#/lights" data-route="lights">Lights</a>
+        <a href="#/exports" data-route="exports">Exports</a>
+        <a href="#/logs" data-route="logs">Logs</a>
+        <a href="#/settings" data-route="settings">Settings</a>
+      </nav>
+
+      <div class="sidebar-status">
+        <div class="panel-label">Server Status</div>
+        <div class="status-line">
+          <span id="server-dot" class="dot dot-off"></span>
+          <span id="server-online-label">OFFLINE</span>
+        </div>
+        <div class="status-metric"><span>CPU</span><span id="sb-cpu">--</span></div>
+        <div class="status-metric"><span>RAM</span><span id="sb-ram">--</span></div>
+        <div class="status-metric"><span>Storage</span><span id="sb-disk">--</span></div>
+      </div>
+    </aside>
+
+    <main id="main">
+      <header id="topbar">
+        <h1 id="page-title">Dashboard</h1>
+        <div id="backend-badge" class="badge badge-warn">Backend: offline</div>
+      </header>
+      <div id="view"></div>
+    </main>
+  </div>
+
+  <!-- New project modal -->
+  <div id="modal-overlay" class="hidden">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h2>New Project</h2>
+        <button id="modal-close" class="icon-btn" aria-label="Close">&times;</button>
+      </div>
+      <form id="new-project-form">
+        <label>Project Name
+          <input type="text" name="name" placeholder="Stinger Matatu" required />
+        </label>
+        <label>Description
+          <input type="text" name="description" placeholder="Optional description" />
+        </label>
+        <label>Reference Video
+          <input type="file" name="video" accept="video/*" />
+        </label>
+        <label>Existing 3D Model
+          <input type="file" name="model" accept=".obj,.fbx,.glb,.gltf,.blend" />
+        </label>
+        <label>Reference Images
+          <input type="file" name="images" accept="image/*" multiple />
+        </label>
+        <fieldset>
+          <legend>Options</legend>
+          <label class="check"><input type="checkbox" name="photogrammetry" checked /> Run photogrammetry</label>
+          <label class="check"><input type="checkbox" name="lights" /> Analyze vehicle lights</label>
+          <label class="check"><input type="checkbox" name="blender" /> Prepare Blender project</label>
+          <label class="check"><input type="checkbox" name="bussid" /> Prepare BUSSID export</label>
+        </fieldset>
+        <div class="modal-actions">
+          <button type="button" id="modal-cancel" class="btn btn-ghost">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Project</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
