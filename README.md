@@ -13,7 +13,7 @@ python -m pip install -r requirements.txt
 ## Run
 
 ```bash
-./start-matatu
+./modz
 ```
 
 Serves the UI and API on port 8002. Set `API_TOKEN` and firewall the port before exposing it beyond localhost.
