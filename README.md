@@ -1,6 +1,6 @@
 # Modz — Vehicle Processing Server
 
-Turn a reference video, photos, or an existing 3D model into a BUSSID-ready vehicle package. Web UI + FastAPI backend + single background worker. CPU-only photogrammetry, no GPU needed.
+As part of an ongoing experiment, i created Modz, a 3d construction pipeline that converts anything from a reference video, images to a complete 3d model. It was specifically desinged to run on old hardware so it is insanely slow but the better hardware you have the better performance. It is a cpu focused pipeline created to run on an old dell latitude E6410 with a core i5 with 6 gigs of ram and that includes the entire backend system. So with better machine better results
 
 ## Setup
 
