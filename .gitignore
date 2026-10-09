@@ -15,4 +15,13 @@ logs/*
 !logs/.gitkeep
 *.log
 
+# SQLite metadata and generated project workspaces
+*.db
+*.db-*
+projects/*
+!projects/stinger/
+projects/stinger/*
+!projects/stinger/.gitkeep
+
 .DS_Store
+.env

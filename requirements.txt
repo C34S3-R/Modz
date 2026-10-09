@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+python-multipart
+yt-dlp
+# Reconstruction engine (backend/reconstruction)
+numpy
+opencv-python-headless
+pillow
+scipy
+scikit-image
+fast_simplification
+# Foreground segmentation for background masking (rembg/u2net, CPU).
+# Optional at runtime: without these the masker falls back to bright-
+# background keying, which skips cluttered scenes rather than guessing.
+rembg
+onnxruntime

@@ -1,105 +1,167 @@
-# Modz - Vehicle Processing Server
+# Matatu — Vehicle Processing Server
 
-A personal, single-user web interface (control panel) for a vehicle-processing
-server running on Linux. The server handles the full workflow of turning a
-reference video or images into a game-ready vehicle mod:
+This repository is the **Matatu vehicle-processing server**. It is separate from
+any Ollama/Qwen AI server and must use its own process, port, database, and
+configuration.
 
-```
-VIDEO / IMAGE / 3D MODEL
-        |
-        v
-      UPLOAD
-        |
-        v
-FRAME EXTRACTION
-        |
-        v
-IMAGE PROCESSING
-        |
-        v
-MESHROOM / ALICEVISION
-        |
-        v
-3D MODEL PROCESSING
-        |
-        v
-       BLENDER
-        |
-        v
-LIGHT DETECTION / CREATION
-        |
-        v
-    BUSSID MATERIALS
-        |
-        v
-    BUSSID EXPORT
-        |
-        v
-      DOWNLOAD
-```
+A personal, single-user control panel for turning a reference video, images, or
+an existing 3D model into a BUSSID-oriented vehicle package. The browser is
+only the interface; FastAPI owns uploads, metadata, processing jobs, and files.
 
-STATUS: under development. The frontend is implemented; the backend is being
-worked on. The UI currently shows offline states until the backend API is
-available.
+## Architecture
 
-## Project Structure
+- `website/` — no-build HTML/CSS/vanilla ES-module frontend. `script.js` is the
+  executable API contract consumed by the UI.
+- `backend/main.py` — FastAPI composition root. It starts the worker, exposes
+  the API, and mounts the website last at `/` so the UI and API share an origin.
+- `backend/api/` — thin HTTP routers for projects, files, processing, lights,
+  exports, and system endpoints.
+- `backend/database.py` — SQLite metadata store. Originals and generated
+  artifacts remain on disk; the database stores jobs, files, checkpoints,
+  lights, settings, and log records.
+- `backend/job_manager.py` — one background worker and shared resource gate.
+  Jobs are queued, pausable, cancellable, retryable, and recoverable after a
+  restart. A SQLite `running` job is marked failed on restart; queued jobs are
+  picked up again.
+- `backend/pipeline/` — isolated stage modules for video validation, frame
+  extraction/filtering/preprocessing, the Meshroom stage (which runs the
+  CPU-only reconstruction engine by default — see
+  `backend/reconstruction/README.md`; `MESHROOM_BACKEND=external` restores
+  the external executable), reconstruction validation, Blender, lights, BUSSID
+  preparation, and packaging.
+
+Runtime directories are kept in the repository but their contents are ignored:
 
 ```
-server/
-|
-|-- website/            Frontend (this repository section)
-|   |-- index.html      App shell: sidebar, topbar, new project modal
-|   |-- style.css       Dark technical theme, responsive layout
-|   |-- script.js       Router, views, API layer, live updates, log viewer
-|
-|-- backend/            Backend (under development)
-|   |-- main.py         FastAPI entry point, API endpoints
-|   |-- processing.py   Processing pipeline logic
-|   |-- jobs.py         Job registry and status tracking
-|
-|-- projects/           One folder per project (e.g. stinger/)
-|-- uploads/            Incoming uploaded files
-|-- processing/         Working directory for the pipeline
-|-- output/             Finished exports (.bussidmod)
-|-- logs/               Server and processing logs
+uploads/                 legacy upload area
+processing/              shared temporary work
+output/                  server-level output copies
+projects/<project>/      input and all project artifacts
+  input/ metadata/ frames/ processed_frames/ rejected_frames/
+  reconstruction/ blender/ lights/ bussid/ exports/ logs/ temp/
+logs/                    server.log
+server.db                SQLite metadata
 ```
 
-## Frontend Pages
+## Setup and running
 
-- Dashboard: server status (CPU, RAM, storage, uptime), quick actions,
-  current project with live progress.
-- Projects: create a project (reference video, 3D model, reference images,
-  pipeline options) and browse existing ones.
-- Project detail: inputs, pipeline visualization with per-stage status
-  (waiting, running, done, failed), start/pause/cancel controls, project
-  file browser with download and confirmed delete, error display with
-  exit code, cause and recovery actions.
-- Processing: overview of all active jobs.
-- 3D Preview: Three.js viewer with rotate/pan/zoom, solid, wireframe and
-  material modes, reset view, model statistics.
-- Lights: light categories (headlights, tail lights, brake lights,
-  indicators, reverse, fog, DRL), preview state presets, manual light
-  editing (position, rotation, scale, material, object).
-- Exports: pre-export checklist, build progress, download of the finished
-  .bussidmod file.
-- Logs: terminal-style log viewer with clear, download and copy.
-- Settings: tool paths (Meshroom, Blender, FFmpeg), directories, maximum
-  concurrent jobs (default 1, single-user server).
+Python 3.10+ and the packages in `requirements.txt` are required:
 
-## Frontend / Backend Contract
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+```
 
-The frontend never runs heavy processing. It only calls the backend:
+After installing dependencies, start the combined API/UI server with one command from any directory:
 
-- REST: `/api/status`, `/api/projects`, `/api/projects/{id}/process`,
-  `/api/projects/{id}/status`, `/api/projects/{id}/lights`,
-  `/api/projects/{id}/export`, `/api/settings`, and related endpoints.
-- Live updates: WebSocket at `/ws` (SSE fallback) carrying progress,
-  stage, operation, logs and errors.
+```bash
+./start-matatu
+```
 
-All processing (frame extraction, Meshroom, Blender, OpenCV, model
-conversion, BUSSID packaging) happens on the Linux server.
+`start-matatu` binds a LAN/Tailscale address automatically (see the startup log for the exact URL). Override it with `HOST`, `PORT`, `PYTHON_BIN`, or extra Uvicorn arguments. The equivalent explicit command is:
 
-## Running
+```bash
+PYTHONPATH=backend python -m uvicorn main:app --host 127.0.0.1 --port 8002
+```
 
-Serve `website/` with any static file server, or through the backend once
-it is implemented (it serves the site and the API on one origin).
+The equivalent backend-directory command is:
+
+```bash
+cd backend && python -m uvicorn main:app --host 127.0.0.1 --port 8002
+```
+
+For a frontend-only preview, use a separate port. API and live updates will be
+unavailable, so the UI intentionally displays offline state:
+
+```bash
+python3 -m http.server -d website 8080
+```
+
+Copy `.env.example` to the server environment (the app does not load `.env`
+files automatically) and adjust paths for the Dell host. Important variables
+include `FFMPEG_PATH`, `FFPROBE_PATH`, `MESHROOM_PATH`, `BLENDER_PATH`,
+`MESHROOM_BACKEND` (default engine, `external` for a real Meshroom install),
+`MAX_CONCURRENT_JOBS`, `MAX_UPLOAD_BYTES`, `MAX_PROJECT_STORAGE_BYTES`,
+`MAX_PROJECT_FILES`, `MAX_EXPORT_BYTES`, and `REQUIRE_EXTERNAL_TOOLS`. The
+launcher selects a non-loopback interface for this server. Set a long
+`API_TOKEN` and firewall the port before exposing it to an untrusted network;
+API clients must then send `X-API-Token` or `Authorization: Bearer ...` (the
+browser UI needs a matching proxy/session setup).
+
+## API contract
+
+The frontend calls these relative paths:
+
+- `GET /api/status` and `GET /api/system/status` — online state, CPU, RAM,
+  disk, uptime, temperature, processes, and external-tool availability.
+- `GET/POST /api/projects`, `GET/DELETE /api/projects/{id}` — project lifecycle.
+  `POST /api/projects` accepts either JSON metadata or the frontend's multipart
+  `meta` plus repeated `files` fields.
+- `GET /api/projects/{id}/status`, `/logs`, `/checkpoints` — state, ordered log
+  entries, and persisted stage checkpoints.
+- `POST /api/projects/{id}/process`, `/pause`, `/resume`, `/cancel`, `/retry` —
+  background job control. Processing responses return immediately with a job
+  ID; the worker performs the work.
+- `GET /api/projects/{id}/files`, `POST /api/projects/{id}/upload` (also accepted at `/files`), and
+  `GET /api/projects/{id}/files/download?path=...` — project file operations.
+  Original input files are protected from API deletion.
+- `GET/PUT/POST/DELETE /api/projects/{id}/lights` and
+  `GET /api/projects/{id}/lights/analysis` — light metadata and analysis.
+- `GET /api/projects/{id}/model` — model URL and basic mesh statistics for the
+  Three.js preview.
+- `GET /api/projects/{id}/export/checklist`,
+  `POST /api/projects/{id}/export`, `POST /api/projects/{id}/export/cancel`, and
+  `GET /api/projects/{id}/export/status` — asynchronous package build.
+- `GET/PUT /api/settings`, `GET/DELETE /api/logs` — persisted settings and
+  server logs.
+- `WS /ws` with `GET /api/events` SSE fallback — progress, stage, operation,
+  log, and error events.
+
+The older `POST /api/upload` and `GET /api/jobs` routes remain as compatibility
+wrappers around projects and the SQLite job manager.
+
+## Pipeline behavior
+
+Every project stores stage state in `projects/<slug>/` and the `state` column.
+Completed stages are checkpoints, so retry/resume does not redo successful
+work. Originals are never overwritten: frame extraction, preprocessing,
+Blender output, BUSSID assets, and exports are separate directories.
+
+External tools are invoked with argument arrays and captured logs:
+
+- FFprobe/FFmpeg validate and extract video when a video is present.
+- The photogrammetry stage named `Meshroom` runs the CPU-only reconstruction
+  engine by default (video/photos → sparse → dense → mesh → low-poly →
+  textured model; no CUDA needed). With `MESHROOM_BACKEND=external` it
+  invokes the configured Meshroom/AliceVision executable instead, where a
+  missing or failed binary becomes a failed stage with exit code/details
+  rather than a FastAPI crash.
+- Blender runs `backend/blender_scripts/prepare_model.py` when configured. If
+  Blender is absent, model-only jobs use a clearly logged compatibility copy so
+  the rest of the recoverable pipeline can be exercised; set
+  `REQUIRE_EXTERNAL_TOOLS=true` to make that fallback an error.
+- Light analysis is deliberately conservative and model/reference-name based;
+  it records detected objects and materials in the project manifest, while a
+  future vision/Blender analyzer can replace that adapter without changing the
+  API.
+- The exporter creates a `.bussidmod` ZIP containing an explicit current-revision
+  asset allowlist under the project's `exports/`, and mirrors it to `output/`.
+
+Only one heavy pipeline worker runs at a time by default. The worker also
+checks available disk/RAM before starting and keeps the original inputs,
+intermediate results, logs, and final outputs separate.
+
+## Verification
+
+There is no repository test suite or lint configuration yet. Useful focused
+checks are:
+
+```bash
+python3 -m py_compile $(find backend -name '*.py' -type f | sort)
+node --check website/script.js       # if Node.js is installed
+```
+
+For an end-to-end smoke check, start the server and exercise `GET /api/status`,
+create a project through the UI, then watch `GET /api/projects/{id}/status` or
+connect to `WS /ws`.

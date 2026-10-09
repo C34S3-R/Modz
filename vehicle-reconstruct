@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# vehicle-reconstruct - CLI for the CPU-only reconstruction engine.
+# Same interpreter resolution and PYTHONPATH as start-backend so the CLI and
+# the web server always share one environment.
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
+if [[ -n "${PYTHON_BIN:-}" ]]; then
+  PYTHON="$PYTHON_BIN"
+elif [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  PYTHON="$ROOT_DIR/.venv/bin/python"
+else
+  PYTHON="python3"
+fi
+
+if ! "$PYTHON" -c 'import numpy, scipy, cv2, PIL' >/dev/null 2>&1; then
+  cat >&2 <<EOF
+Reconstruction dependencies are missing for: $PYTHON
+Install them with:
+  $PYTHON -m pip install numpy scipy opencv-python-headless pillow trimesh
+EOF
+  exit 1
+fi
+
+export PYTHONPATH="$ROOT_DIR/backend${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONUNBUFFERED=1
+exec "$PYTHON" "$ROOT_DIR/backend/vehicle_reconstruct.py" "$@"

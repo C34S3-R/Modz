@@ -3,13 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Vehicle Lab</title>
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0b0e13" />
+  <title>Modz 3D Lab</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235b8cff'/%3E%3Cstop offset='1' stop-color='%239b6cff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M16 2l12 7v14l-12 7L4 23V9z'/%3E%3Cpath fill='%230b0e13' d='M16 8l6 3.5v7L16 22l-6-3.5v-7z'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="style.css" />
   <script type="importmap">
     {
       "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        "three": "./vendor/three/build/three.module.js",
+        "three/addons/": "./vendor/three/examples/jsm/"
       }
     }
   </script>
@@ -22,7 +25,7 @@
 
     <aside id="sidebar">
       <div class="sidebar-head">
-        <div class="logo">VEHICLE LAB</div>
+        <div class="logo"><span class="logo-mark" aria-hidden="true"></span>VEHICLE LAB</div>
         <div class="logo-sub">VEHICLE SERVER</div>
       </div>
 
@@ -67,13 +70,29 @@
       </div>
       <form id="new-project-form">
         <label>Project Name
-          <input type="text" name="name" placeholder="Stinger Matatu" required />
+          <input type="text" name="name" placeholder="Small wooden chair" required />
         </label>
         <label>Description
           <input type="text" name="description" placeholder="Optional description" />
         </label>
+        <label>Project Type
+          <select name="project_type">
+            <option value="general" selected>General 3D model</option>
+            <option value="vehicle">Vehicle (matatu / car)</option>
+          </select>
+        </label>
+        <label>Starting Preset
+          <select name="preset">
+            <option value="small" selected>Small object — fewer frames, faster</option>
+            <option value="standard">Standard</option>
+            <option value="vehicle">Vehicle — detailed</option>
+          </select>
+        </label>
         <label>Reference Video
           <input type="file" name="video" accept="video/*" />
+        </label>
+        <label>Online Video URL
+          <input type="url" name="video_url" placeholder="https://...mp4 or YouTube link" />
         </label>
         <label>Existing 3D Model
           <input type="file" name="model" accept=".obj,.fbx,.glb,.gltf,.blend" />
@@ -84,10 +103,16 @@
         <fieldset>
           <legend>Options</legend>
           <label class="check"><input type="checkbox" name="photogrammetry" checked /> Run photogrammetry</label>
-          <label class="check"><input type="checkbox" name="lights" /> Analyze vehicle lights</label>
-          <label class="check"><input type="checkbox" name="blender" /> Prepare Blender project</label>
-          <label class="check"><input type="checkbox" name="bussid" /> Prepare BUSSID export</label>
+          <label class="check"><input type="checkbox" name="lights" /> Analyze lights</label>
+          <label class="check"><input type="checkbox" name="blender" checked /> Prepare Blender project</label>
+          <label class="check"><input type="checkbox" name="mask_background" checked /> Remove background before reconstruction</label>
+          <label class="check"><input type="checkbox" name="bussid" /> Convert to BUSSID mod format (optional, can enable later)</label>
+          <label class="check"><input type="checkbox" name="force_weak_source" /> Run even if the source check fails</label>
         </fieldset>
+        <div id="upload-progress" style="display:none">
+          <div class="progress"><div id="upload-bar" style="width:0%"></div></div>
+          <div id="upload-status" class="muted">Preparing…</div>
+        </div>
         <div class="modal-actions">
           <button type="button" id="modal-cancel" class="btn btn-ghost">Cancel</button>
           <button type="submit" class="btn btn-primary">Create Project</button>
@@ -98,6 +123,6 @@
 
   <div id="toasts"></div>
 
-  <script type="module" src="script.js"></script>
+  <script type="module" src="script.js?v=7"></script>
 </body>
 </html>

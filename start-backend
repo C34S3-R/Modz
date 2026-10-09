@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
+if [[ -n "${PYTHON_BIN:-}" ]]; then
+  PYTHON="$PYTHON_BIN"
+elif [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+  PYTHON="$ROOT_DIR/.venv/bin/python"
+else
+  PYTHON="python3"
+fi
+
+# Bind a real server interface by default. Prefer Tailscale when present so a
+# remote operator can reach the host without opening every interface.
+if [[ -z "${HOST:-}" ]]; then
+  for address in $(hostname -I 2>/dev/null); do
+    case "$address" in
+      100.*)
+        HOST="$address"
+        break
+        ;;
+    esac
+  done
+  if [[ -z "${HOST:-}" ]]; then
+    for address in $(hostname -I 2>/dev/null); do
+      case "$address" in
+        127.*|::1) ;;
+        *) HOST="$address"; break ;;
+      esac
+    done
+  fi
+  HOST="${HOST:-0.0.0.0}"
+fi
+
+if ! "$PYTHON" -c 'import fastapi, multipart, uvicorn' >/dev/null 2>&1; then
+  cat >&2 <<EOF
+Backend dependencies are missing for: $PYTHON
+Install them with:
+  python3 -m venv .venv
+  . .venv/bin/activate
+  python -m pip install -r requirements.txt
+EOF
+  exit 1
+fi
+
+export PYTHONPATH="$ROOT_DIR/backend${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONUNBUFFERED=1
+PORT="${PORT:-8002}"
+printf 'Starting vehicle server at http://%s:%s\n' "$HOST" "$PORT" >&2
+exec "$PYTHON" -m uvicorn main:app \
+  --host "$HOST" \
+  --port "$PORT" \
+  "$@"

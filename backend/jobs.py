@@ -1,45 +1,27 @@
-"""In-memory job registry.
+"""Compatibility names for the old in-memory job placeholder.
 
-Tracks the status of processing jobs. Swap the dict for a database or
-on-disk store if jobs must survive restarts.
+Production job state is persisted by :class:`backend.database.Database` and
+managed by :class:`backend.job_manager.JobManager`.  These functions remain
+only as a clear failure point for old imports; new code must not create a
+second, process-local registry.
 """
 
-import itertools
-import threading
-import time
-from typing import Optional
+from __future__ import annotations
 
-_lock = threading.Lock()
-_jobs: dict[str, dict] = {}
-_ids = itertools.count(1)
+from typing import Any
 
 
-def create(filename: str) -> dict:
-    """Register a new job for the given filename."""
-    job = {
-        "id": next(_ids),
-        "filename": filename,
-        "status": "queued",
-        "created_at": time.time(),
-    }
-    with _lock:
-        _jobs[str(job["id"])] = job
-    return job
+def create(filename: str) -> dict[str, Any]:
+    raise RuntimeError("The legacy in-memory jobs registry was removed; use JobManager.enqueue_pipeline()")
 
 
-def get(job_id) -> Optional[dict]:
-    with _lock:
-        job = _jobs.get(str(job_id))
-        return dict(job) if job else None
+def get(job_id: Any) -> None:
+    raise RuntimeError("The legacy in-memory jobs registry was removed; use JobManager.get_job()")
 
 
-def set_status(job_id, status: str) -> None:
-    with _lock:
-        job = _jobs.get(str(job_id))
-        if job:
-            job["status"] = status
+def set_status(job_id: Any, status: str) -> None:
+    raise RuntimeError("The legacy in-memory jobs registry was removed; use JobManager")
 
 
-def list_all() -> list[dict]:
-    with _lock:
-        return [dict(job) for job in sorted(_jobs.values(), key=lambda j: j["id"])]
+def list_all() -> list[dict[str, Any]]:
+    raise RuntimeError("The legacy in-memory jobs registry was removed; use JobManager.list_jobs()")
