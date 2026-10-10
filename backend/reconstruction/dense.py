@@ -2,10 +2,12 @@
 
 For every registered view the sweep warps each neighbour view through a
 family of per-pixel depth hypotheses, scores agreement with masked local NCC,
-and keeps the hypothesis that best explains the pixel.  One reference view is
-processed at a time and its depth map is written to disk before the next one
-starts, so the E6410 never holds more than a few working-size images plus one
-(planes x pixels) cost volume - measured peak stays well under 0.5 GB.
+and keeps the hypothesis that best explains the pixel.  Reference views are
+swept in parallel worker threads (ThreadPoolExecutor, bounded by
+``dense_workers``) and each depth map is written to disk by the main thread
+as results land, so the E6410 holds at most ``workers`` working-size image
+sets plus one (planes x pixels) cost volume each - measured peak stays
+around 0.5 GB per worker.
 
 Three design rules carry the accuracy; each was measured against the sparse
 reconstruction used as ground truth (projects/realvid, median relative depth
@@ -617,6 +619,102 @@ def _fuse_cloud(cfg: ReconConfig, views: List[Dict[str, Any]],
 # Stage entry point
 # ---------------------------------------------------------------------------
 
+def _sweep_one_view(cfg: ReconConfig, views: List[Dict[str, Any]],
+                    points: np.ndarray, frames: Dict[str, Path],
+                    ref_index: int, check: Any = None) -> Dict[str, Any]:
+    """Sweep a single reference view (worker-thread entry point).
+
+    Pure compute: reads shared views/points/frames, returns either a
+    ``skipped`` record or the arrays for the main thread to persist.
+    Only ``check`` (cancellation) touches pipeline state from workers.
+    """
+    ref = views[ref_index]
+    if check is not None:
+        check()
+    out_name = ref["name"]
+    frame_path = frames.get(out_name)
+
+    # --- reference geometry ------------------------------------------
+    u, v, z = _project(ref, points)
+    inside = ((z > 0.05) & np.isfinite(u) & np.isfinite(v)
+              & (u >= 0) & (u < ref["width"])
+              & (v >= 0) & (v < ref["height"]))
+    pts_full = np.stack([u[inside], v[inside], z[inside]], axis=1)
+    if frame_path is None or len(pts_full) < _MIN_VIEW_POINTS:
+        return {"view": out_name, "outcome": "skipped",
+                "reason": ("frame missing" if frame_path is None
+                           else f"only {len(pts_full)} sparse points in frustum")}
+
+    target = _working_size(ref["width"], ref["height"], cfg)
+    gray_ref = _load_gray(frame_path, target)
+    height, width = gray_ref.shape
+    sx, sy = width / ref["width"], height / ref["height"]
+    pts_ref = np.stack([pts_full[:, 0] * sx, pts_full[:, 1] * sy,
+                        pts_full[:, 2]], axis=1)
+
+    ranges = _grid_depth_range(pts_ref, height, width, cfg.dense_block)
+    if ranges is None:
+        return {"view": out_name, "outcome": "skipped",
+                "reason": "no usable depth range"}
+    zlo, zhi = ranges
+    inv_lo = 1.0 / zhi
+    inv_hi = 1.0 / zlo
+    # Robust (p95) rather than max: one block containing a near-camera
+    # sparse outlier (measured: a point at z=0.66 next to background at
+    # z=75) would demand an unaffordable plane count for the whole view
+    # and, through the span gate, shut out every neighbour.  The few
+    # extreme blocks are simply swept a little coarser.
+    inv_span_max = float(np.percentile(inv_hi - inv_lo, 95))
+    median_depth = float(np.median(pts_full[:, 2]))
+
+    K_w = _working_intrinsics(ref, target)
+    focal_work = float(K_w[0, 0])
+    chosen = _select_neighbors(
+        views, ref_index, median_depth=median_depth,
+        inv_span_max=inv_span_max, focal_work=focal_work, cfg=cfg)
+    if not chosen:
+        return {"view": out_name, "outcome": "skipped",
+                "reason": "no neighbour within resolvable parallax"}
+
+    span_max = max(span for _, span in chosen)
+    planes = int(np.clip(np.ceil(span_max / cfg.dense_step_px),
+                         32, cfg.dense_max_planes))
+
+    ys, xs = np.mgrid[0:height, 0:width]
+    grid = np.stack([xs.reshape(-1), ys.reshape(-1),
+                     np.ones(height * width, np.float64)])
+    rays = np.linalg.inv(K_w) @ grid
+
+    sources = []
+    for index, _span in chosen:
+        src_path = frames.get(views[index]["name"])
+        if src_path is None:
+            continue
+        sources.append((views[index], src_path))
+    if len(sources) == 0:
+        return {"view": out_name, "outcome": "skipped",
+                "reason": "neighbour frames missing"}
+
+    depth, ncc, agreement = _sweep_view(
+        cfg, ref, sources, gray_ref, rays, inv_lo, inv_hi, planes, check)
+
+    agreement_check = _sparse_agreement(depth, pts_ref)
+    valid = ncc >= cfg.dense_min_ncc
+    return {
+        "view": out_name, "outcome": "swept",
+        "neighbors": len(sources), "planes": planes,
+        "depth": depth.astype(np.float32), "ncc": ncc.astype(np.float32),
+        "agreement": agreement.astype(np.float32),
+        "valid": valid.astype(np.uint8), "sx": np.float32(sx),
+        "width": np.int32(width), "height": np.int32(height),
+        "coverage": round(float(valid.mean()), 4),
+        "ncc_mean": round(float(ncc[valid].mean()), 4) if valid.any() else 0.0,
+        "agreement_mean": round(float(agreement[valid].mean()), 4)
+        if valid.any() else 0.0,
+        "sparse_check": agreement_check,
+    }
+
+
 def run_dense(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str, Any]:
     cv2 = _cv2()  # noqa: F841  (import applies CPU/thread policy from config)
     views = load_views(cfg)
@@ -657,31 +755,17 @@ def run_dense(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[st
     skipped: List[Dict[str, str]] = []
     agreement_rel: List[float] = []
 
+    # --- parallel sweep --------------------------------------------------
+    # Views are independent: each reads the shared views/points/frames and
+    # produces its own depth map.  Cached maps are reused up front; the rest
+    # run in worker threads while the main thread persists results and owns
+    # all logging/progress.  A missing frame now skips its view instead of
+    # failing the stage - the map count in the summary says what happened.
+    import concurrent.futures as _futures
+
     for ref_index, ref in enumerate(views):
         ctx.check()
         out_path = _depth_path(cfg, ref["name"])
-        frame_path = frames.get(ref["name"])
-        if frame_path is None:
-            raise ReconstructionError(
-                f"Selected frame for {ref['name']} is missing.",
-                suggestion="Re-run frame extraction; the sparse stage "
-                           "references frames that are no longer on disk.",
-                details={"frame": ref["name"]},
-            )
-
-        # --- reference geometry ------------------------------------------
-        u, v, z = _project(ref, points)
-        inside = ((z > 0.05) & np.isfinite(u) & np.isfinite(v)
-                  & (u >= 0) & (u < ref["width"])
-                  & (v >= 0) & (v < ref["height"]))
-        pts_full = np.stack([u[inside], v[inside], z[inside]], axis=1)
-        if len(pts_full) < _MIN_VIEW_POINTS:
-            skipped.append({"view": ref["name"],
-                            "reason": f"only {len(pts_full)} sparse points "
-                                      f"in frustum"})
-            ctx.note(f"{ref['name']}: skipped ({len(pts_full)} sparse points)")
-            continue
-
         if out_path.is_file():
             cached = _load_depth(out_path)
             if cached is not None:
@@ -698,98 +782,60 @@ def run_dense(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[st
                 )
                 continue
 
-        target = _working_size(ref["width"], ref["height"], cfg)
-        gray_ref = _load_gray(frame_path, target)
-        height, width = gray_ref.shape
-        sx, sy = width / ref["width"], height / ref["height"]
-        pts_ref = np.stack([pts_full[:, 0] * sx, pts_full[:, 1] * sy,
-                            pts_full[:, 2]], axis=1)
-
-        ranges = _grid_depth_range(pts_ref, height, width, cfg.dense_block)
-        if ranges is None:
-            skipped.append({"view": ref["name"], "reason": "no usable depth range"})
-            continue
-        zlo, zhi = ranges
-        inv_lo = 1.0 / zhi
-        inv_hi = 1.0 / zlo
-        # Robust (p95) rather than max: one block containing a near-camera
-        # sparse outlier (measured: a point at z=0.66 next to background at
-        # z=75) would demand an unaffordable plane count for the whole view
-        # and, through the span gate, shut out every neighbour.  The few
-        # extreme blocks are simply swept a little coarser.
-        inv_span_max = float(np.percentile(inv_hi - inv_lo, 95))
-        median_depth = float(np.median(pts_full[:, 2]))
-
-        K_w = _working_intrinsics(ref, target)
-        focal_work = float(K_w[0, 0])
-        chosen = _select_neighbors(
-            views, ref_index, median_depth=median_depth,
-            inv_span_max=inv_span_max, focal_work=focal_work, cfg=cfg)
-        if not chosen:
-            skipped.append({"view": ref["name"],
-                            "reason": "no neighbour within resolvable parallax"})
-            ctx.note(f"{ref['name']}: skipped (no resolvable neighbour)")
-            continue
-
-        span_max = max(span for _, span in chosen)
-        planes = int(np.clip(np.ceil(span_max / cfg.dense_step_px),
-                             32, cfg.dense_max_planes))
-
-        ys, xs = np.mgrid[0:height, 0:width]
-        grid = np.stack([xs.reshape(-1), ys.reshape(-1),
-                         np.ones(height * width, np.float64)])
-        rays = np.linalg.inv(K_w) @ grid
-
-        sources = []
-        for index, _span in chosen:
-            src_path = frames.get(views[index]["name"])
-            if src_path is None:
+    todo = [i for i in range(len(views))
+            if not _depth_path(cfg, views[i]["name"]).is_file()]
+    workers = max(1, min(3, int(getattr(cfg, "threads", 2) or 2)))
+    ctx.note(f"sweeping {len(todo)} views on {workers} workers "
+             f"({reused} reused from cache)")
+    done_count = 0
+    check = ctx.check
+    with _futures.ThreadPoolExecutor(max_workers=workers,
+                                     thread_name_prefix="sweep") as pool:
+        future_of = {pool.submit(_sweep_one_view, cfg, views, points,
+                                 frames, i, check): i for i in todo}
+        for future in _futures.as_completed(future_of):
+            ctx.check()
+            result = future.result()
+            done_count += 1
+            if result["outcome"] == "skipped":
+                skipped.append({"view": result["view"],
+                                "reason": result["reason"]})
+                ctx.note(f"{result['view']}: skipped ({result['reason']})")
                 continue
-            sources.append((views[index], src_path))
-        if len(sources) == 0:
-            skipped.append({"view": ref["name"], "reason": "neighbour frames missing"})
-            continue
-
-        depth, ncc, agreement = _sweep_view(
-            cfg, ref, sources, gray_ref, rays, inv_lo, inv_hi, planes, ctx)
-
-        agreement_check = _sparse_agreement(depth, pts_ref)
-        if agreement_check.get("samples"):
-            agreement_rel.append(agreement_check["median_rel_err"])
-
-        valid = ncc >= cfg.dense_min_ncc
-        np.savez_compressed(
-            out_path,
-            depth=depth.astype(np.float32),
-            ncc=ncc.astype(np.float32),
-            agreement=agreement.astype(np.float32),
-            valid=valid.astype(np.uint8),
-            scale=np.float32(sx),
-            width=np.int32(width),
-            height=np.int32(height),
-        )
-        per_view.append(
-            {
-                "view": ref["name"],
-                "reused": False,
-                "neighbors": len(sources),
-                "planes": planes,
-                "coverage": round(float(valid.mean()), 4),
-                "ncc_mean": round(float(ncc[valid].mean()), 4) if valid.any() else 0.0,
-                "agreement_mean": round(float(agreement[valid].mean()), 4)
-                if valid.any() else 0.0,
-                "sparse_check": agreement_check,
-            }
-        )
-
-        if (ref_index + 1) % 5 == 0 or ref_index == len(views) - 1:
-            sample = {"at_view": ref_index + 1, **memory_pressure(cfg.ram_limit_gb)}
-            pressure.append(sample)
-            ctx.note(
-                f"{ref_index + 1}/{len(views)} views swept "
-                f"({reused} reused, rss {sample['process_rss_gb']} GB, "
-                f"last coverage {per_view[-1]['coverage']:.0%})")
-
+            out_path = _depth_path(cfg, result["view"])
+            np.savez_compressed(
+                out_path,
+                depth=result["depth"],
+                ncc=result["ncc"],
+                agreement=result["agreement"],
+                valid=result["valid"],
+                scale=result["sx"],
+                width=result["width"],
+                height=result["height"],
+            )
+            if result["sparse_check"].get("samples"):
+                agreement_rel.append(
+                    result["sparse_check"]["median_rel_err"])
+            per_view.append(
+                {
+                    "view": result["view"],
+                    "reused": False,
+                    "neighbors": result["neighbors"],
+                    "planes": result["planes"],
+                    "coverage": result["coverage"],
+                    "ncc_mean": result["ncc_mean"],
+                    "agreement_mean": result["agreement_mean"],
+                    "sparse_check": result["sparse_check"],
+                }
+            )
+            if done_count % 5 == 0 or done_count == len(todo):
+                sample = {"at_view": done_count,
+                          **memory_pressure(cfg.ram_limit_gb)}
+                pressure.append(sample)
+                ctx.note(
+                    f"{done_count}/{len(todo)} views swept "
+                    f"({reused} reused, rss {sample['process_rss_gb']} GB, "
+                    f"last coverage {per_view[-1]['coverage']:.0%})")
     swept = [entry for entry in per_view if not entry.get("reused")]
     if not per_view:
         raise ReconstructionError(
