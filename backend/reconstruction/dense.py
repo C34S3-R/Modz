@@ -619,6 +619,17 @@ def _fuse_cloud(cfg: ReconConfig, views: List[Dict[str, Any]],
 # Stage entry point
 # ---------------------------------------------------------------------------
 
+class _CheckShim:
+    """Minimal ctx for worker threads: cancellation only, no logging."""
+
+    def __init__(self, check: Any = None):
+        self._check = check
+
+    def check(self) -> None:
+        if self._check is not None:
+            self._check()
+
+
 def _sweep_one_view(cfg: ReconConfig, views: List[Dict[str, Any]],
                     points: np.ndarray, frames: Dict[str, Path],
                     ref_index: int, check: Any = None) -> Dict[str, Any]:
@@ -696,7 +707,8 @@ def _sweep_one_view(cfg: ReconConfig, views: List[Dict[str, Any]],
                 "reason": "neighbour frames missing"}
 
     depth, ncc, agreement = _sweep_view(
-        cfg, ref, sources, gray_ref, rays, inv_lo, inv_hi, planes, check)
+        cfg, ref, sources, gray_ref, rays, inv_lo, inv_hi, planes,
+        _CheckShim(check))
 
     agreement_check = _sparse_agreement(depth, pts_ref)
     valid = ncc >= cfg.dense_min_ncc
