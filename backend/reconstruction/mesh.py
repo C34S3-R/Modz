@@ -710,9 +710,29 @@ def run_mesh(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str
                  f"{anchor_stats['components']} components, "
                  f"-{anchor_stats['faces_dropped']} faces "
                  f"(radius {anchor_stats['radius']})")
+    # Completeness pass: stitch small boundary holes with trimesh before
+    # the face-count gate.  Missing patches (unseen angles, weak texture)
+    # otherwise stay open forever; filling keeps the shell watertight
+    # where the boundary is short and unambiguous.
+    try:
+        import trimesh
+        hole_mesh = trimesh.Trimesh(vertices=np.ascontiguousarray(verts),
+                                    faces=np.ascontiguousarray(faces),
+                                    process=True)
+        before = int(len(hole_mesh.faces))
+        hole_mesh.fill_holes()
+        if len(hole_mesh.faces) != before:
+            verts = np.asarray(hole_mesh.vertices, dtype=np.float64)
+            faces = np.asarray(hole_mesh.faces, dtype=np.int64)
+            if len(rgb) == before:
+                extra = np.zeros((len(faces) - before, 3), dtype=rgb.dtype)
+                rgb = np.vstack([rgb, extra])
+            ctx.note(f"hole fill: +{len(faces) - before} faces "
+                     f"({before} -> {len(faces)})")
+    except Exception as exc:
+        ctx.note(f"hole fill skipped ({exc}); mesh continues unpatched")
     if len(faces) < 1000:
-        raise ReconstructionError(
-            f"Pruning left only {len(faces)} faces - the depth maps do not "
+        raise ReconstructionError(            f"Pruning left only {len(faces)} faces - the depth maps do not "
             f"agree well enough to form a surface.",
             suggestion="Check dense/dense_meta.json (sparse_check, "
                        "agreement) and reconstruction_report.json match "

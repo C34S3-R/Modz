@@ -9,6 +9,7 @@ pillow
 scipy
 scikit-image
 fast_simplification
+trimesh
 # Foreground segmentation for background masking (rembg/u2net, CPU).
 # Optional at runtime: without these the masker falls back to bright-
 # background keying, which skips cluttered scenes rather than guessing.
