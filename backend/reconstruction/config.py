@@ -390,6 +390,16 @@ class ReconConfig:
     # at the sparse spacing removes them, taking bounding-box error from
     # +56/+163/+273% to -4/+13/+12% while retaining 73% of true surface.
     mesh_anchor_rel: float = 1.0
+    # Solidity pass.  Plane-sweep depth on real footage covers ~10% of
+    # pixels, so the weight-gated TSDF is a sponge: a thin shell full of
+    # holes, tunnels and separate chunks.  Closing bridges gaps up to
+    # mesh_solidify_radius voxels, hole filling seals the cavities, and
+    # marching cubes then runs on the signed distance field of the
+    # *filled* mask, which yields one watertight body instead of a heap
+    # of fragments.  The radius is in voxels (voxel size is typically
+    # 0.03-0.1 units, so 4 voxels bridges ~0.1-0.4 unit gaps).
+    mesh_solidify: bool = True
+    mesh_solidify_radius: int = 4
 
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -465,6 +475,8 @@ class ReconConfig:
             mesh_min_weight=_i("RECON_MESH_MIN_WEIGHT", 5),
             mesh_support_rel=_f("RECON_MESH_SUPPORT_REL", 0.5),
             mesh_anchor_rel=_f("RECON_MESH_ANCHOR_REL", 1.0),
+            mesh_solidify=(os.getenv("RECON_MESH_SOLIDIFY", "1") == "1"),
+            mesh_solidify_radius=_i("RECON_MESH_SOLIDIFY_RADIUS", 4),
             match_window=_i("RECON_MATCH_WINDOW", 5),
             min_registered_ratio=_f("RECON_MIN_REGISTERED_RATIO", 0.35),
             initial_fov_degrees=_f("RECON_INITIAL_FOV", 60.0),
@@ -608,6 +620,7 @@ class ReconConfig:
                 "mesh_crop", "mesh_resolution", "mesh_trunc_voxels",
                 "mesh_trunc_rel", "mesh_color_tol_voxels",
                 "mesh_min_weight", "mesh_support_rel", "mesh_anchor_rel",
+                "mesh_solidify", "mesh_solidify_radius",
             ))
 
     def lowpoly_fingerprint(self) -> str:

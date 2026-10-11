@@ -340,6 +340,116 @@ def _extract(tsdf: np.ndarray, voxel: float, origin: np.ndarray
     return world, faces.astype(np.int64)
 
 
+def _solidify(tsdf: np.ndarray, cfg: ReconConfig, ctx: StageContext
+              ) -> Tuple[np.ndarray, Dict[str, Any]]:
+    """Turn the gappy fused shell into one closed body.
+
+    The TSDF only carries samples inside the truncation band, so its
+    negative region is a *shell* with holes wherever the depth maps were
+    weak - on real footage ~90% of pixels, hence the chunked look.  This
+    pass works on the occupancy mask instead: closing bridges gaps up to
+    ``mesh_solidify_radius`` voxels, hole filling seals the enclosed
+    interior, only the largest body survives, and the signed distance
+    field of that mask becomes the surface marching cubes extracts.  The
+    result is a single watertight mesh; every hole the depth maps left
+    open is closed at the scale of the bridging radius.
+    """
+    try:
+        from scipy import ndimage
+    except ImportError as exc:  # pragma: no cover - dependency guard
+        raise ReconstructionError(
+            "scipy is required for the solidity pass.",
+            suggestion="python3 -m pip install scipy",
+            details={"error": str(exc)}) from exc
+
+    occ = tsdf < 0.0
+    del tsdf
+    stats: Dict[str, Any] = {"occupied_voxels": int(occ.sum())}
+    if not occ.any():
+        raise ReconstructionError(
+            "No surface: the TSDF never crossed zero.",
+            suggestion="Check dense/dense_meta.json coverage for this "
+                       "project; the depth maps never agreed on a surface.",
+            details={"negative_voxels": 0})
+
+    radius = max(1, int(cfg.mesh_solidify_radius))
+    axis = np.arange(-radius, radius + 1, dtype=np.int32)
+    zz, yy, xx = np.meshgrid(axis, axis, axis, indexing="ij")
+    ball = (zz * zz + yy * yy + xx * xx) <= radius * radius
+    ctx.check()
+
+    # Dilate then erode (not binary_closing) so voxels on the volume
+    # border are not eaten by the border handling of closing.
+    solid = ndimage.binary_dilation(occ, structure=ball)
+    del occ
+    ctx.check()
+    solid = ndimage.binary_erosion(solid, structure=ball, border_value=1)
+    stats["after_close"] = int(solid.sum())
+
+    # Sealed cavities and tunnels become interior; anything still open to
+    # the outside (unseen angles) stays open - the honest behaviour.
+    solid = ndimage.binary_fill_holes(solid)
+    ctx.check()
+    stats["after_fill"] = int(solid.sum())
+
+    # One body: everything else is a floating fragment.
+    labels, count = ndimage.label(solid)
+    if count > 1:
+        sizes = np.bincount(labels.ravel())
+        sizes[0] = 0
+        biggest = int(sizes.argmax())
+        stats["components"] = int(count)
+        stats["components_kept"] = 1
+        stats["fragments_dropped_voxels"] = int(sizes.sum() - sizes[biggest])
+        solid = labels == biggest
+    del labels
+    ctx.check()
+
+    # Signed distance field of the filled mask: smooth, closed level set.
+    inside = ndimage.distance_transform_edt(solid).astype(np.float32)
+    outside = ndimage.distance_transform_edt(np.logical_not(solid)
+                                             ).astype(np.float32)
+    del solid
+    sdf = outside - inside           # >0 outside, <0 inside, 0 on surface
+    del inside, outside
+    ctx.check()
+    return sdf, stats
+
+
+def _keep_largest(verts: np.ndarray, faces: np.ndarray, rgb: np.ndarray,
+                  ctx: StageContext) -> Tuple[np.ndarray, np.ndarray,
+                                              np.ndarray, Dict[str, Any]]:
+    """Keep only the largest connected component (single solid body)."""
+    stats: Dict[str, Any] = {"applied": False}
+    if not len(faces):
+        return verts, faces, rgb, stats
+    try:
+        from scipy.sparse import coo_matrix
+        from scipy.sparse.csgraph import connected_components
+    except ImportError as exc:  # pragma: no cover - dependency guard
+        raise ReconstructionError(
+            "scipy is required to keep the largest component.",
+            suggestion="python3 -m pip install scipy",
+            details={"error": str(exc)}) from exc
+    edges = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]],
+                            faces[:, [2, 0]]])
+    adjacency = coo_matrix((np.ones(len(edges), dtype=np.uint8),
+                            (edges[:, 0], edges[:, 1])),
+                           shape=(len(verts), len(verts)))
+    ncomp, labels = connected_components(adjacency, directed=False)
+    stats["components"] = int(ncomp)
+    if ncomp <= 1:
+        return verts, faces, rgb, stats
+    sizes = np.bincount(labels)
+    keep = labels == int(sizes.argmax())
+    verts, faces, rgb, prune = _prune(verts, faces, rgb, keep)
+    stats.update({"applied": True, "components_kept": 1,
+                  "vertices_dropped": prune["vertices_in"] - prune["vertices_kept"],
+                  "faces_dropped": prune["faces_in"] - prune["faces_kept"]})
+    ctx.check()
+    return verts, faces, rgb, stats
+
+
 def _colourize(cfg: ReconConfig, views: List[Dict[str, Any]],
                depth_paths: Dict[str, Path], frames: Dict[str, Path],
                verts: np.ndarray, voxel: float,
@@ -508,14 +618,23 @@ def _sparse_baseline(cfg: ReconConfig, views: List[Dict[str, Any]],
 
 
 def _prune(verts: np.ndarray, faces: np.ndarray, rgb: np.ndarray,
-           keep: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray,
-                                      Dict[str, Any]]:
-    """Drop unsupported vertices and every face that needs one."""
+           keep: np.ndarray, require_all: bool = True
+           ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
+    """Drop unsupported vertices and every face that needs one.
+
+    ``require_all`` picks how a face is judged: ``True`` drops it when
+    ANY vertex is unsupported (aggressive - the default when the raw
+    surface still carries floating sheets), ``False`` drops it only when
+    ALL of them are (connectivity-preserving - used with the solidity
+    pass, whose grid-level gates already removed the junk, so tearing
+    holes here would only re-fragment the shell).
+    """
     stats = {"vertices_in": int(len(verts)),
              "vertices_kept": int(len(verts)),
              "faces_in": int(len(faces)), "faces_kept": int(len(faces))}
     if not keep.all():
-        face_ok = keep[faces].all(axis=1)
+        face_ok = (keep[faces].all(axis=1) if require_all
+                   else keep[faces].any(axis=1))
         faces = faces[face_ok]
         remap = np.full(len(verts), -1, dtype=np.int64)
         kept_idx = np.flatnonzero(keep)
@@ -676,6 +795,17 @@ def run_mesh(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str
              f"{fuse_stats['gate_kept_of_covered']:.0%} of covered voxels")
     ctx.check()
 
+    # Solidity: close the holes the depth maps left and extract the
+    # surface of the *filled* body, so the mesh comes out as one
+    # watertight shell instead of a heap of chunks.
+    solid_stats: Dict[str, Any] = {"applied": False}
+    if cfg.mesh_solidify:
+        tsdf, solid_stats = _solidify(tsdf, cfg, ctx)
+        solid_stats["applied"] = True
+        ctx.note(f"solidify (radius {cfg.mesh_solidify_radius} voxels): "
+                 f"{solid_stats.get('after_fill', 0)} voxels in one body, "
+                 f"{solid_stats.get('components', 1)} component(s) before")
+
     verts, faces = _extract(tsdf, volume["voxel"], volume["origin"])
     del tsdf
     ctx.note(f"marching cubes: {len(verts)} vertices, {len(faces)} faces")
@@ -698,18 +828,37 @@ def run_mesh(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str
     ctx.note(f"support baseline (sparse) {baseline['support_p50']:.2f} "
              f"-> threshold {threshold:.2f} "
              f"({colour_stats['supported_share']:.0%} of vertices)")
+    # With the solidity pass on, the grid already gated junk and the mesh
+    # must stay connected: drop only faces whose vertices are ALL
+    # unsupported instead of tearing a hole for every weak vertex (on
+    # realvid-style projects that cut ~57% of the surface at the median
+    # and re-fragmented the shell).
     verts, faces, rgb, prune_stats = _prune(
-        verts, faces, rgb, support >= threshold)
+        verts, faces, rgb, support >= threshold,
+        require_all=not cfg.mesh_solidify)
     ctx.note(f"support prune: {prune_stats['vertices_kept']} vertices, "
              f"{prune_stats['faces_kept']} faces "
              f"({prune_stats['dropped_share']:.0%} dropped)")
-    verts, faces, rgb, anchor_stats = _drop_unanchored(
-        cfg, verts, faces, rgb, sparse_pts, ctx)
+    anchor_stats: Dict[str, Any] = {"applied": False}
+    if cfg.mesh_solidify:
+        # Component anchoring is replaced by "keep the largest body":
+        # it keeps every fragment that touches validated surface, which
+        # is exactly the chunked look the solidity pass removes.
+        anchor_stats = {"applied": False,
+                        "reason": "replaced by keep-largest-component"}
+    else:
+        verts, faces, rgb, anchor_stats = _drop_unanchored(
+            cfg, verts, faces, rgb, sparse_pts, ctx)
     if anchor_stats.get("applied"):
         ctx.note(f"anchor prune: {anchor_stats['components_kept']}/"
                  f"{anchor_stats['components']} components, "
                  f"-{anchor_stats['faces_dropped']} faces "
                  f"(radius {anchor_stats['radius']})")
+    if cfg.mesh_solidify:
+        verts, faces, rgb, large_stats = _keep_largest(verts, faces, rgb, ctx)
+        if large_stats.get("applied"):
+            ctx.note(f"largest component: {large_stats['components']} -> 1 "
+                     f"(-{large_stats['faces_dropped']} faces)")
     # Completeness pass: stitch small boundary holes with trimesh before
     # the face-count gate.  Missing patches (unseen angles, weak texture)
     # otherwise stay open forever; filling keeps the shell watertight
@@ -746,13 +895,16 @@ def run_mesh(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str
 
     meta: Dict[str, Any] = {
         "fingerprint": fingerprint,
-        "algorithm": "TSDF fusion + marching cubes (scikit-image, lewiner)",
+        "algorithm": ("TSDF fusion + marching cubes (scikit-image, lewiner)"
+                      + (" + solidity closing/fill" if cfg.mesh_solidify
+                         else "")),
         "views_total": len(views),
         "views_with_depth": len(depth_paths),
         "volume": {key: value for key, value in volume.items()
                    if key != "origin"},
         "volume_origin": [round(float(x), 4) for x in volume["origin"]],
         "fusion": fuse_stats,
+        "solidify": solid_stats,
         "support_baseline": baseline,
         "mesh": {
             "vertices": int(len(verts)),
