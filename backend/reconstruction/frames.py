@@ -196,7 +196,7 @@ def extract_frames(cfg: ReconConfig, store: StateStore, ctx: StageContext,
     original = cfg.d("frames", "original")
     original.mkdir(parents=True, exist_ok=True)
     # Fresh run: remove only frames we generated, never anything in input/.
-    for stale in original.glob("frame_*.jpg"):
+    for stale in cfg.frames("frames", "original"):
         try:
             stale.unlink()
         except OSError:
@@ -252,7 +252,7 @@ def extract_frames(cfg: ReconConfig, store: StateStore, ctx: StageContext,
             exit_code=exc.returncode,
         ) from exc
 
-    files = sorted(original.glob("frame_*.jpg"))
+    files = cfg.frames("frames", "original")
     if not files:
         raise ReconstructionError(
             "Frame extraction produced no frames.",
@@ -325,7 +325,7 @@ def select_frames(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dic
     rejected_dir = cfg.d("frames", "rejected")
     selected_dir.mkdir(parents=True, exist_ok=True)
     rejected_dir.mkdir(parents=True, exist_ok=True)
-    frames = sorted(original.glob("frame_*.jpg"))
+    frames = cfg.frames("frames", "original")
     if not frames:
         raise ReconstructionError(
             "Frame selection found no extracted frames.",

@@ -146,7 +146,7 @@ def _sparse_cloud(cfg: ReconConfig) -> np.ndarray:
 def _frames_by_name(cfg: ReconConfig) -> Dict[str, Path]:
     from .features import selected_frames
 
-    masked = sorted(cfg.d("frames", "masked").glob("frame_*.jpg"))
+    masked = cfg.frames("frames", "masked")
     if masked:
         # Geometry stages (dense, mesh, texture) consume the masked copies
         # so the background contributes no depth or texels.  Pose stages

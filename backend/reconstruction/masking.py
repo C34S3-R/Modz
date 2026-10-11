@@ -154,7 +154,7 @@ def run_masking(cfg, store, ctx) -> Dict[str, Any]:
         # files exist there, so a disabled run must not inherit them.
         masked_dir = cfg.d("frames", "masked")
         if masked_dir.is_dir():
-            for stale in masked_dir.glob("frame_*.jpg"):
+            for stale in cfg.frames("frames", "masked"):
                 try:
                     stale.unlink()
                 except OSError:
@@ -165,7 +165,7 @@ def run_masking(cfg, store, ctx) -> Dict[str, Any]:
         return result
     selected_dir = cfg.d("frames", "selected")
     masked_dir = cfg.d("frames", "masked")
-    frames = sorted(selected_dir.glob("frame_*.jpg"))
+    frames = cfg.frames("frames", "selected")
     if not frames:
         raise ReconstructionError(
             "Background masking found no selected frames.",
@@ -174,7 +174,7 @@ def run_masking(cfg, store, ctx) -> Dict[str, Any]:
     # Fresh output: stale masks from a previous configuration must not leak
     # into the geometry stages.
     if masked_dir.is_dir():
-        for stale in masked_dir.glob("frame_*.jpg"):
+        for stale in cfg.frames("frames", "masked"):
             try:
                 stale.unlink()
             except OSError:

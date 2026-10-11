@@ -24,6 +24,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 CPU_ONLY = True  # global switch; see enforce_cpu_only()
 
+# Reference images may arrive in any of these formats.  Video extraction
+# always yields .jpg, but the image-import path keeps each photo's
+# original suffix, so every frame-reading stage must accept all of them.
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+
 # Human-readable list of what actually runs. Printed once at startup so an
 # operator can see there is no hidden GPU path.
 CPU_ALGORITHMS = {
@@ -499,6 +504,21 @@ class ReconConfig:
     def d(self, *parts: str) -> Path:
         """A path inside the project (created on demand by ensure_layout)."""
         return self.project_dir.joinpath(*parts)
+
+    def frames(self, *parts: str) -> List[Path]:
+        """Every extracted frame in a directory, in order, any image format.
+
+        The image-import path copies reference photos keeping their
+        original suffix (a .png stays .png) while FFmpeg video extraction
+        writes .jpg.  Every stage that reads frames must accept both, or
+        PNG/TIFF reference sets are copied but never found and the
+        reconstruction dies before it starts.
+        """
+        directory = self.d(*parts)
+        found: List[Path] = []
+        for ext in IMAGE_EXTENSIONS:
+            found.extend(directory.glob(f"frame_*{ext}"))
+        return sorted(found)
 
     def ensure_layout(self) -> None:
         """Create the isolated per-project directory tree (spec section 28)."""

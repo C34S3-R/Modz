@@ -28,13 +28,11 @@ def _cv2():
 
 
 def selected_frames(cfg: ReconConfig) -> List[Path]:
-    selected = cfg.d("frames", "selected")
-    frames = sorted(selected.glob("frame_*.jpg"))
+    frames = cfg.frames("frames", "selected")
     if frames:
         return frames
-    # Legacy layout from the web backend: frames/frame_*.jpg
-    frames = sorted(cfg.d("frames").glob("frame_*.jpg"))
-    return frames
+    # Legacy layout from the web backend: frames/frame_*
+    return cfg.frames("frames")
 
 
 def _npz_path(cfg: ReconConfig, frame: Path) -> Path:
