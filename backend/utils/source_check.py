@@ -239,12 +239,20 @@ def check_video_source(
     if samples and usable:
         sharp = sum(1 for s in usable if s["sharp"] and s["exposed"])
         rate = sharp / max(1, len(usable))
+        # Advisory only: sharpness was always a proxy for "will SIFT find
+        # features here".  utils.screening now measures that directly
+        # (ORB keypoints per view on the real footage), and on
+        # YouTube-compressed night clips the proxy fires while the
+        # honest measurement passes - measured on a clip that
+        # reconstructs 99/102 views: 2/12 sharp, 1334 keypoints/view.
         add("frame quality", rate >= MIN_SHARP_PASS_RATE,
             f"{sharp}/{len(usable)} sampled frames sharp and well-exposed "
             f"(need >= {int(MIN_SHARP_PASS_RATE * 100)}%) - blurry/dark "
-            f"footage starves feature matching")
+            f"footage starves feature matching; footage screening decides",
+            blocking=False)
     elif samples:
-        add("frame quality", False, "sampled frames could not be decoded")
+        add("frame quality", False, "sampled frames could not be decoded",
+            blocking=False)
     else:
         warnings.append("frame quality: sampler unavailable - metadata checks only")
         checks.append({"name": "frame quality", "ok": True,
