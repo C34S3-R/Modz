@@ -14,6 +14,17 @@ at working size, so screening a 3-minute clip costs a few seconds:
   walks the camera several frame-widths across the subject; a tripod
   pan in place, a zoom, or a locked-off shot gives almost none, and
   without parallax there is no depth to reconstruct.
+* **continuous camera motion** - the share of consecutive sample pairs
+  whose true median flow is effectively zero (a still frame).  This is
+  the check that catches a *showcase reel*: a montage of still renders
+  joined by crossfades, where each pair either holds a frozen image or
+  dissolves between two unrelated views.  The mean flow gets lifted by
+  the fading edges and reports motion that is not there (measured: a
+  matatu showcase clip showed 0.69% mean travel - clearing the gate -
+  but a 0.00px true median and 85% of pairs completely static).  The
+  reconstruction that follows locks onto burned-in overlays and the
+  flat backdrop, producing a mesh that bears no resemblance to the
+  subject on screen.
 * **cuts** - ORB match count *and* histogram correlation between
   consecutive samples (both must fire: measured on real clips, either
   signal alone misfires - pairs of genuinely consecutive views of a
@@ -25,6 +36,11 @@ at working size, so screening a 3-minute clip costs a few seconds:
   black, blank plastic, plain paint) give SIFT nothing to match, which
   is the single most common reason a real object reconstructs as
   fragments.
+* **texture belongs to the subject** - how many of the frame's features
+  actually move with the scene.  A burned-in logo/watermark or a static
+  backdrop contributes features that never move; matching locks onto
+  them (they are the only perfectly visible, noise-free points) and the
+  model becomes a slab at the overlay plane instead of the subject.
 * **exposure stability** - brightness swing across the clip; heavy
   flicker desynchronises matching between frames.
 
@@ -61,11 +77,18 @@ def _i(name: str, default: int) -> int:
 
 SAMPLE_COUNT = _i("SCREEN_SAMPLE_COUNT", 16)
 WORKING_WIDTH = _i("SCREEN_WORKING_WIDTH", 640)
-MIN_TRAVEL_PCT = _f("SCREEN_MIN_TRAVEL_PCT", 0.25)    # parallax floor
-GOOD_TRAVEL_PCT = _f("SCREEN_GOOD_TRAVEL_PCT", 4.0)   # comfortable orbit
-MAX_TRAVEL_PCT = _f("SCREEN_MAX_TRAVEL_PCT", 30.0)    # whip-pan ceiling
+MIN_TRAVEL_PCT = _f("SCREEN_MIN_TRAVEL_PCT", 0.05)    # parallax floor
+GOOD_TRAVEL_PCT = _f("SCREEN_GOOD_TRAVEL_PCT", 0.8)   # comfortable orbit
+MAX_TRAVEL_PCT = _f("SCREEN_MAX_TRAVEL_PCT", 6.0)     # whip-pan ceiling
+# A pair whose true median flow sits under this is a still frame, not a
+# view.  0.1% of a 640px frame is 0.64px: measured real orbit footage
+# runs 0.8-1.0%, a slideshow of stills with crossfades 0.00%.
+STATIC_TRAVEL_PCT = _f("SCREEN_STATIC_TRAVEL_PCT", 0.1)
+MAX_STATIC_PAIR_SHARE = _f("SCREEN_MAX_STATIC_PAIR_SHARE", 0.5)
 CUT_CORR = _f("SCREEN_CUT_CORR", 0.6)                 # cut histogram gate
 MAX_CUT_SHARE = _f("SCREEN_MAX_CUT_SHARE", 0.25)
+FROZEN_FLOW_PX = _f("SCREEN_FROZEN_FLOW_PX", 1.0)     # overlay = no flow
+MAX_FROZEN_SHARE = _f("SCREEN_MAX_FROZEN_SHARE", 0.5)  # texture in overlay
 MIN_TEXTURE_KP = _i("SCREEN_MIN_TEXTURE_KP", 150)
 GOOD_TEXTURE_KP = _i("SCREEN_GOOD_TEXTURE_KP", 400)
 MAX_BRIGHTNESS_SWING = _f("SCREEN_MAX_BRIGHTNESS_SWING", 45.0)
@@ -112,9 +135,55 @@ def _sample(video: Path, count: int, duration_s: float) -> List[Path]:
     return sorted(tmp.glob("s_*.jpg"))
 
 
+def _static_texture(images: List["Any"], orb: Any
+                    ) -> Dict[str, Any]:
+    """How much of the frame's texture never moves.
+
+    A burned-in overlay (studio logo, watermark, lower-third text) sits
+    in the same pixels in every frame while the subject rotates behind
+    it.  Feature matching then locks onto the overlay - it is the only
+    thing with perfect, noise-free, constantly-visible features - and the
+    reconstruction becomes a slab at the overlay plane instead of the
+    subject.  Measured on a matatu showcase clip: 99/102 views
+    registered, but only 3269 sparse points, all on the watermark.
+
+    So texture only counts when it moves with the scene.  A pixel is
+    "frozen" when its optical flow stays below a pixel across every
+    consecutive pair while the frame overall moves; texture that lives
+    almost entirely in frozen pixels is overlay, not subject.
+    """
+    import cv2  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    frozen_flow = np.zeros(images[0].shape, dtype=np.float32)
+    pairs = 0
+    for index in range(1, len(images)):
+        flow = cv2.calcOpticalFlowFarneback(
+            images[index - 1], images[index], None, pyr_scale=0.5, levels=3,
+            winsize=21, iterations=3, poly_n=5, poly_sigma=1.2, flags=0)
+        frozen_flow = np.maximum(frozen_flow,
+                                 cv2.magnitude(flow[..., 0], flow[..., 1]))
+        pairs += 1
+    frozen = frozen_flow < FROZEN_FLOW_PX
+
+    keypoints = orb.detect(images[len(images) // 2], None)
+    if not keypoints:
+        return {"frozen_keypoint_share": 0.0, "moving_keypoints": 0,
+                "frozen_keypoints": 0}
+    frozen_count = sum(1 for kp in keypoints
+                       if frozen[int(kp.pt[1]), int(kp.pt[0])])
+    return {
+        "frozen_keypoint_share": round(frozen_count / len(keypoints), 3),
+        "moving_keypoints": int(len(keypoints) - frozen_count),
+        "frozen_keypoints": int(frozen_count),
+        "frozen_pixel_share": round(float(frozen.mean()), 3),
+    }
+
+
 def _metrics(frames: List[Path]) -> Dict[str, Any]:
     """Flow travel, cut share, texture, exposure swing over the samples."""
     import cv2  # noqa: PLC0415  (optional dependency)
+    import numpy as np  # noqa: PLC0415
 
     images = [cv2.imread(str(p), cv2.IMREAD_GRAYSCALE) for p in frames]
     images = [img for img in images if img is not None]
@@ -172,38 +241,37 @@ def _metrics(frames: List[Path]) -> Dict[str, Any]:
             images[index - 1], images[index], None, pyr_scale=0.5, levels=3,
             winsize=15, iterations=3, poly_n=5, poly_sigma=1.2, flags=0)
         magnitude = cv2.magnitude(flow[..., 0], flow[..., 1])
-        travels.append(float(cv2.medianBlur(magnitude, 5).mean()
-                             / max(1, width) * 100.0))
+        # True median, never the mean of a median-blurred field.  A
+        # slideshow of still renders joined by crossfades moves only the
+        # fading edges while the whole frame is frozen; the mean is
+        # lifted by exactly that small region and reports motion that is
+        # not there.  Measured on a showcase clip: mean-of-median-blur
+        # 0.69% (cleared the gate) while the true median was 0.00px and
+        # 74% of pairs were completely static.
+        travels.append(float(np.median(magnitude) / max(1, width) * 100.0))
 
     for index, img in enumerate(images):
         keypoints.append(len(descriptors[index][0]))
         brightness.append(float(img.mean()))
 
+    overlay = _static_texture(images, orb)
+
     if not travels:
         raise ValueError("every consecutive pair looks like a cut")
+    static_share = (sum(1 for value in travels if value < STATIC_TRAVEL_PCT)
+                    / len(travels))
     travels.sort()
     return {
         "samples": len(images),
         "travel_pct_median": round(travels[len(travels) // 2], 2),
         "travel_pct_max": round(travels[-1], 2),
+        "static_pair_share": round(static_share, 3),
         "cut_share": round(cuts / max(1, pairs), 3),
         "cuts": cuts,
         "chaining_matches_median": int(median_good),
         "keypoints_median": int(sorted(keypoints)[len(keypoints) // 2]),
         "brightness_swing": round(max(brightness) - min(brightness), 1),
-    }
-
-    if not travels:
-        raise ValueError("every consecutive pair looks like a cut")
-    travels.sort()
-    return {
-        "samples": len(images),
-        "travel_pct_median": round(travels[len(travels) // 2], 2),
-        "travel_pct_max": round(travels[-1], 2),
-        "cut_share": round(cuts / max(1, pairs), 3),
-        "cuts": cuts,
-        "keypoints_median": int(sorted(keypoints)[len(keypoints) // 2]),
-        "brightness_swing": round(max(brightness) - min(brightness), 1),
+        **overlay,
     }
 
 
@@ -254,6 +322,22 @@ def screen_video(video: Path, *, ffprobe: Optional[str] = None
     else:
         add("camera travel", True, f"{travel}% per view - good parallax")
 
+    # A slideshow of stills joined by crossfades: most pairs show no
+    # motion at all, only the fade itself.  Photogrammetry needs a
+    # camera walking around one subject; a montage of separate renders
+    # cannot triangulate.  Measured on a matatu showcase clip: 74% of
+    # pairs fully static, 3269 sparse points, mesh bore no resemblance
+    # to the vehicle on screen.
+    static_share = meta.get("static_pair_share", 0.0)
+    if static_share > MAX_STATIC_PAIR_SHARE:
+        add("continuous camera motion", False,
+            f"{int(static_share * 100)}% of consecutive views show no "
+            f"motion - this is a slideshow/cutshow of still shots, not a "
+            f"continuous orbit around one subject")
+    else:
+        add("continuous camera motion", True,
+            f"{int(static_share * 100)}% of consecutive views are still")
+
     cut_share = meta["cut_share"]
     if cut_share > MAX_CUT_SHARE:
         # Advisory only: on compressed footage a cut and a hard-to-match
@@ -283,6 +367,28 @@ def screen_video(video: Path, *, ffprobe: Optional[str] = None
     else:
         add("surface texture", True, f"~{texture} feature points per view")
 
+    # Texture that never moves is a burned-in overlay, not the subject.
+    # Matching locks onto it and the model comes out as a slab at the
+    # overlay plane (measured: a watermark-only showcase clip gave
+    # 3269 sparse points and a mesh that bore no resemblance to the
+    # vehicle in the video).
+    frozen_share = meta.get("frozen_keypoint_share", 0.0)
+    moving_kp = meta.get("moving_keypoints", 0)
+    if frozen_share > MAX_FROZEN_SHARE and moving_kp < GOOD_TEXTURE_KP:
+        add("texture belongs to the subject", False,
+            f"{int(frozen_share * 100)}% of features never move while the "
+            f"scene does - that is a burned-in logo/watermark or a static "
+            f"backdrop, and only ~{moving_kp} moving features remain; the "
+            f"reconstruction would lock onto the overlay, not the subject")
+    elif frozen_share > MAX_FROZEN_SHARE:
+        add("texture belongs to the subject", False,
+            f"{int(frozen_share * 100)}% of features never move - a "
+            f"burned-in overlay dominates the frame", blocking=False)
+    else:
+        add("texture belongs to the subject", True,
+            f"{int((1 - frozen_share) * 100)}% of features move with the "
+            f"scene")
+
     swing = meta["brightness_swing"]
     if swing > MAX_BRIGHTNESS_SWING:
         add("stable exposure", False,
@@ -292,13 +398,39 @@ def screen_video(video: Path, *, ffprobe: Optional[str] = None
         add("stable exposure", True, f"brightness swing {swing} levels")
 
     passed = sum(1 for c in checks if c["ok"])
+    # Advice that names the actual problem.  A showcase reel (still
+    # renders joined by crossfades) is not a slow orbit, so telling the
+    # user to "re-shoot with a slower orbit" misdiagnoses it - the
+    # footage is not of the real object at all and no setting recovers a
+    # model from it.
+    guidance: Optional[str] = None
+    if failures:
+        if meta.get("static_pair_share", 0.0) > MAX_STATIC_PAIR_SHARE:
+            guidance = (
+                "This clip is a montage of still shots (a showcase/reel), "
+                "not one continuous orbit around a single object, so the "
+                "camera positions cannot be triangulated. Film the real "
+                "subject yourself: walk one slow unbroken 360-degree orbit "
+                "1-2 m away, keeping it filling the frame under even light, "
+                "and avoid cuts, zooms, or edits between separate shots."
+            )
+        elif meta.get("keypoints_median", 0) < MIN_TEXTURE_KP:
+            guidance = (
+                "The surface is too smooth or dark for the matcher to "
+                "find features. Add texture before filming (matte spray, "
+                "stickers, or a dusting of flour), shoot under diffuse "
+                "even light, and keep the camera 1-2 m away so the "
+                "surface fills the frame with visible detail."
+            )
+        else:
+            guidance = _GUIDANCE
     return {
         "ok": not failures,
         "score": f"{passed}/{len(checks)}",
         "checks": checks,
         "failures": failures,
         "warnings": warnings,
-        "guidance": None if not failures else _GUIDANCE,
+        "guidance": guidance,
         "meta": meta,
     }
 
