@@ -636,10 +636,16 @@ def _prune(verts: np.ndarray, faces: np.ndarray, rgb: np.ndarray,
         face_ok = (keep[faces].all(axis=1) if require_all
                    else keep[faces].any(axis=1))
         faces = faces[face_ok]
+        # Remap against the vertices the SURVIVING FACES actually use: in
+        # the "any" mode a kept face may still reference an unsupported
+        # vertex, which has to stay in the array instead of becoming -1.
+        used = np.zeros(len(verts), dtype=bool)
+        if len(faces):
+            used[faces.reshape(-1)] = True
         remap = np.full(len(verts), -1, dtype=np.int64)
-        kept_idx = np.flatnonzero(keep)
+        kept_idx = np.flatnonzero(used)
         remap[kept_idx] = np.arange(len(kept_idx), dtype=np.int64)
-        verts, rgb = verts[keep], rgb[keep]
+        verts, rgb = verts[used], rgb[used]
         faces = remap[faces]
         stats["vertices_kept"] = int(len(verts))
         stats["faces_kept"] = int(len(faces))
