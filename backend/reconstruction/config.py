@@ -29,6 +29,15 @@ CPU_ONLY = True  # global switch; see enforce_cpu_only()
 # original suffix, so every frame-reading stage must accept all of them.
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 
+# Bump when a stage's *code* changes behaviour, independent of config.
+# The checkpoint fingerprints are built from config values only, so a pure
+# algorithm fix (no config change) would otherwise silently reuse a stale
+# cached result and the fix would never run.  Keeping a version per stage
+# and folding it into that stage's fingerprint forces a re-run on code
+# changes.  MESH bumped to 2 when the support-prune was disabled on
+# solidified builds (it was shattering the watertight body).
+MESH_ALGO_VERSION = 2
+
 # Human-readable list of what actually runs. Printed once at startup so an
 # operator can see there is no hidden GPU path.
 CPU_ALGORITHMS = {
@@ -635,13 +644,15 @@ class ReconConfig:
         volume, depth maps fill the TSDF), so it inherits
         ``dense_fingerprint`` and adds only its own fusion parameters.
         """
-        return self.dense_fingerprint() + "|mesh|" + "|".join(
+        return (self.dense_fingerprint()
+                + f"|mesh-v{MESH_ALGO_VERSION}|"
+                + "|".join(
             f"{k}={getattr(self, k)}" for k in (
                 "mesh_crop", "mesh_resolution", "mesh_trunc_voxels",
                 "mesh_trunc_rel", "mesh_color_tol_voxels",
                 "mesh_min_weight", "mesh_support_rel", "mesh_anchor_rel",
                 "mesh_solidify", "mesh_solidify_radius",
-            ))
+            )))
 
     def lowpoly_fingerprint(self) -> str:
         """Invalidates the decimated mesh when the raw mesh or the target

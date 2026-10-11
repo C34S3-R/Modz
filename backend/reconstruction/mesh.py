@@ -929,14 +929,25 @@ def run_mesh(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str
     ctx.note(f"support baseline (sparse) {baseline['support_p50']:.2f} "
              f"-> threshold {threshold:.2f} "
              f"({colour_stats['supported_share']:.0%} of vertices)")
-    # With the solidity pass on, the grid already gated junk and the mesh
-    # must stay connected: drop only faces whose vertices are ALL
-    # unsupported instead of tearing a hole for every weak vertex (on
-    # realvid-style projects that cut ~57% of the surface at the median
-    # and re-fragmented the shell).
-    verts, faces, rgb, prune_stats = _prune(
-        verts, faces, rgb, support >= threshold,
-        require_all=not cfg.mesh_solidify)
+    # With the solidity pass on, SKIP the support prune entirely.  The two
+    # are at odds: solidify *creates* surface to close the gaps the depth
+    # maps left (that is the whole point - a watertight body), while the
+    # support gate *removes* surface whose observing views disagree - which
+    # is exactly the gap-filled region.  Even the "all vertices
+    # unsupported" form tore out 51% of a clean solidified shell and
+    # shattered it into thousands of floating fragments (non-watertight),
+    # because a filled gap is by construction not directly multi-view
+    # observed.  The volume-domain gates above (weight >= mesh_min_weight,
+    # keep-largest-body, hole fill) already removed the junk the prune
+    # targeted, so pruning here only undoes solidity.  With solidify off
+    # (legacy chunked path) the prune still runs as before.
+    if cfg.mesh_solidify:
+        prune_stats = {"vertices_kept": int(len(verts)),
+                       "faces_kept": int(len(faces)), "dropped_share": 0.0,
+                       "skipped": "solidify (kept watertight body)"}
+    else:
+        verts, faces, rgb, prune_stats = _prune(
+            verts, faces, rgb, support >= threshold, require_all=True)
     ctx.note(f"support prune: {prune_stats['vertices_kept']} vertices, "
              f"{prune_stats['faces_kept']} faces "
              f"({prune_stats['dropped_share']:.0%} dropped)")
