@@ -245,10 +245,11 @@ function statusDot(status) {
 // pipeline will stop until better videos/images are supplied.
 function sourceCheckView(rep) {
   const box = el("div");
+  const screenScore = rep.screening ? rep.screening.score : null;
   const head = el("div", { class: "row-between" },
     el("span", { class: rep.ok ? "st-done" : "st-fail" },
-      `${rep.ok ? "✓ Good source" : "✕ Weak source"} (${rep.score || "--"})`),
-    el("span", { class: "muted" }, rep.source === "images" ? "image set" : "video"),
+      `${rep.ok ? "✓ Good source" : "✕ Weak source"} (${rep.score || "--"}${screenScore ? ` · screening ${screenScore}` : ""})`),
+    el("span", { class: "muted" }, rep.source === "images" ? "image set" : "video · auto-screened"),
   );
   box.append(head);
   for (const c of rep.checks || []) {
@@ -607,13 +608,14 @@ async function submitNewProject(event) {
     .flat()
     .filter(Boolean);
 
-  // A build without a reference video fails in seconds at Video Validation.
-  // Warn now instead of wasting an upload + a doomed pipeline run.
-  // An online URL counts as a video source: the server fetches it itself.
+  // No dialogs in the create flow: the server screens the footage
+  // automatically during Video Validation (orbit travel, texture,
+  // cuts) and stops with guidance if the clip cannot reconstruct.
+  // An online URL counts as a video source: the server fetches it.
   const hasVideo = videoUrl
     || files.some((f) => (f.type || "").startsWith("video/") || /\.(mp4|mov|mkv|avi|webm|m4v)$/i.test(f.name || ""));
   if (!hasVideo && meta.options.photogrammetry) {
-    if (!confirm("No reference video selected — the build will fail at Video Validation. Create the project anyway?")) return;
+    toast("No video selected — screening will stop the build with guidance", "warn");
   }
 
   const btn = form.querySelector('button[type="submit"]');
@@ -758,6 +760,16 @@ views.project = function renderProjectDetail() {
 
   // Inputs
   const inputs = (p.inputs || []).map((f) => f.name || f);
+  // The Inputs card lists what the USER supplied.  Extracted frames,
+  // metadata and generated models are pipeline products - showing all
+  // 70+ of them turned the card into a wall of filenames.
+  const USER_KINDS = new Set(["video", "image", "model"]);
+  const supplied = (p.inputs || []).filter((f) => USER_KINDS.has(f.kind));
+  const generated = (p.inputs || []).filter((f) => !USER_KINDS.has(f.kind));
+  const frameCount = (p.inputs || []).filter((f) => f.kind === "frame").length;
+  const productSummary = generated.length
+    ? `${frameCount ? `${frameCount} extracted frames · ` : ""}${generated.length - frameCount} generated file(s)`
+    : "";
   const sourceBox = el("div", { id: "source-check-result", class: "muted mt" }, "");
   const advisorBox = el("div", { id: "advisor-result", class: "mt" }, "");
   const urlInput = el("input", { type: "url", placeholder: "https://...mp4 or YouTube link", style: "flex:1" });
@@ -806,8 +818,9 @@ views.project = function renderProjectDetail() {
   }
   v.append(el("div", { class: "card mt" },
     el("div", { class: "panel-label" }, "Inputs"),
-    inputs.length ? el("div", { class: "file-tree" }, inputs.map((n) => el("div", { class: "file" }, n)))
+    supplied.length ? el("div", { class: "file-tree" }, supplied.map((f) => el("div", { class: "file" }, f.name || f)))
       : el("div", { class: "muted" }, "No input files."),
+    productSummary ? el("div", { class: "muted mt" }, productSummary) : null,
     el("div", { class: "row mt" },
       urlInput,
       el("button", {

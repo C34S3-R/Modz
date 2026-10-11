@@ -122,8 +122,23 @@ def validate(ctx: PipelineContext) -> Dict[str, Any]:
     }
     source_report = _check_video(video, ctx)
     metadata["source_check"] = source_report
+    # Automatic footage screening: does the camera actually orbit the
+    # subject, and is the surface matchable at all.  Runs for every
+    # video with no user confirmation, so weak footage stops here
+    # (seconds) instead of after hours of reconstruction.
+    screen_report = _screen_video(video, ctx)
+    metadata["screening"] = screen_report
     metadata_path = ctx.write_json("metadata", "video.json", metadata)
     ctx.register(metadata_path, "metadata")
+    for entry in screen_report.get("checks", []):
+        ctx.log(
+            f"screening: {'ok' if entry['ok'] else 'WEAK'} - "
+            f"{entry['name']} - {entry['detail']}",
+            stage="SCREENING",
+            operation="screen",
+            status="completed",
+            level="INFO" if entry["ok"] else "WARNING",
+        )
     if not source_report["ok"]:
         if _force_allowed(ctx):
             ctx.log(
@@ -141,10 +156,28 @@ def validate(ctx: PipelineContext) -> Dict[str, Any]:
                 + ". " + (source_report["guidance"] or ""),
                 details={"source_check": source_report},
             )
+    if not screen_report.get("ok", True):
+        if _force_allowed(ctx):
+            ctx.log(
+                "Footage screening FAILED but force_weak_source is on - "
+                "running anyway: " + "; ".join(screen_report["failures"]),
+                stage="SCREENING",
+                operation="screen",
+                status="completed",
+                level="WARNING",
+            )
+        else:
+            raise StageError(
+                "FOOTAGE SCREENING FAILED: this clip cannot reconstruct a "
+                "complete model - " + "; ".join(screen_report["failures"])
+                + ". " + (screen_report.get("guidance") or ""),
+                details={"screening": screen_report},
+            )
     ctx.log(
         f"Validated {video.name}: {width}x{height}, {metadata['fps']} fps, "
         f"{metadata['duration_seconds']}s "
-        f"(source check {source_report['score']})",
+        f"(source check {source_report['score']}, "
+        f"screening {screen_report.get('score', 'n/a')})",
         stage="VIDEO",
         operation="validate",
         status="completed",
@@ -157,6 +190,24 @@ def validate(ctx: PipelineContext) -> Dict[str, Any]:
 def _force_allowed(ctx: PipelineContext) -> bool:
     """Explicit per-project override: run even when the source check fails."""
     return bool((ctx.project.get("options") or {}).get("force_weak_source", False))
+
+
+def _screen_video(video: Path, ctx: PipelineContext) -> Dict[str, Any]:
+    """Photogrammetry suitability screening (never raises)."""
+    from utils.screening import screen_video
+
+    try:
+        return screen_video(video, ffprobe=ctx.settings.tool("ffprobe_path"))
+    except Exception as exc:
+        return {
+            "ok": True,
+            "score": "n/a",
+            "checks": [],
+            "failures": [],
+            "warnings": [f"footage screening skipped: {exc}"],
+            "guidance": None,
+            "meta": {},
+        }
 
 
 def _parse_fps(value: str) -> float:

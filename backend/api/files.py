@@ -116,6 +116,28 @@ def _source_check(services, project_id: int):
             ffprobe=services.settings.tool("ffprobe_path"),
         )
         report["source"] = "video"
+        # Footage screening runs automatically during Video Validation;
+        # surface the same verdict here so the user sees what the
+        # pipeline will decide before starting a build.
+        from utils.screening import screen_video
+
+        try:
+            screen = screen_video(
+                path, ffprobe=services.settings.tool("ffprobe_path")
+            )
+        except Exception as exc:
+            screen = {"ok": True, "score": "n/a", "checks": [],
+                      "failures": [], "warnings": [f"skipped: {exc}"]}
+        report["screening"] = screen
+        report["checks"] = list(report.get("checks") or []) + list(
+            screen.get("checks") or [])
+        report["ok"] = bool(report.get("ok", True)) and bool(screen.get("ok", True))
+        report["failures"] = list(report.get("failures") or []) + list(
+            screen.get("failures") or [])
+        report["warnings"] = list(report.get("warnings") or []) + list(
+            screen.get("warnings") or [])
+        if screen.get("guidance") and not report.get("guidance"):
+            report["guidance"] = screen["guidance"]
         return report
     if images:
         report = check_image_set([path for _row, path in images])
