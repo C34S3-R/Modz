@@ -373,6 +373,25 @@ def _solidify(tsdf: np.ndarray, cfg: ReconConfig, ctx: StageContext
             details={"negative_voxels": 0})
 
     radius = max(1, int(cfg.mesh_solidify_radius))
+    # Crop to the occupied bounding box before any morphological work.
+    # The fusion volume is mostly empty space; every pass below - the
+    # ball closing, hole fill, labelling, and above all the two float64
+    # distance transforms - scales with the CROPPED size.  On this host
+    # the full-grid transforms pushed python to 3.6 GB and the OOM killer
+    # terminated the build mid-mesh.  The margin is 2*radius+2 so every
+    # voxel the closing can touch sits strictly inside the crop and the
+    # border_value convention of the erosion never changes the result:
+    # the output is identical to the uncropped pass, just affordable.
+    coords = np.argwhere(occ)
+    lo = np.maximum(coords.min(axis=0) - (2 * radius + 2), 0)
+    hi = np.minimum(coords.max(axis=0) + (2 * radius + 2) + 1, occ.shape)
+    del coords
+    offset = lo.astype(np.int64)
+    occ = np.ascontiguousarray(occ[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]])
+    stats["crop_offset"] = [int(v) for v in offset]
+    stats["crop_dims"] = [int(v) for v in occ.shape]
+    ctx.check()
+
     axis = np.arange(-radius, radius + 1, dtype=np.int32)
     zz, yy, xx = np.meshgrid(axis, axis, axis, indexing="ij")
     ball = (zz * zz + yy * yy + xx * xx) <= radius * radius
@@ -805,14 +824,23 @@ def run_mesh(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str
     # surface of the *filled* body, so the mesh comes out as one
     # watertight shell instead of a heap of chunks.
     solid_stats: Dict[str, Any] = {"applied": False}
+    volume_origin = volume["origin"]
     if cfg.mesh_solidify:
         tsdf, solid_stats = _solidify(tsdf, cfg, ctx)
         solid_stats["applied"] = True
+        # _solidify cropped the grid to the occupied region, so the
+        # extracted vertices are relative to the crop, not the full
+        # volume.  Shift the origin by the crop offset (in world units)
+        # so every vertex still lands where it was fused.
+        crop_offset = np.asarray(solid_stats.get("crop_offset", (0, 0, 0)),
+                                 dtype=np.float32)
+        volume_origin = (volume["origin"]
+                         + crop_offset * np.float32(volume["voxel"]))
         ctx.note(f"solidify (radius {cfg.mesh_solidify_radius} voxels): "
                  f"{solid_stats.get('after_fill', 0)} voxels in one body, "
                  f"{solid_stats.get('components', 1)} component(s) before")
 
-    verts, faces = _extract(tsdf, volume["voxel"], volume["origin"])
+    verts, faces = _extract(tsdf, volume["voxel"], volume_origin)
     del tsdf
     ctx.note(f"marching cubes: {len(verts)} vertices, {len(faces)} faces")
 
