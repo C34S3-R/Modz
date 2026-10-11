@@ -51,7 +51,7 @@ from .dense import (
     load_views,
 )
 from .ply import write_ply_mesh
-from .state import StageContext, StateStore, memory_pressure
+from .state import StageContext, StateStore, memory_pressure, read_meminfo
 
 # Hard ceiling on the voxel grid (~160M cells = ~0.9 GB of TSDF + weight).
 # The default 384^3 is 57M cells; this only triggers on a hand-set
@@ -60,6 +60,29 @@ _MAX_GRID_VOXELS = 160_000_000
 # Fusion runs in slabs of about this many voxels: ~40 MB of temporaries.
 _SLAB_VOXELS = 1_000_000
 _WEIGHT_CAP = 64          # averaging cap; early estimates stop counting
+
+# Peak *stage* footprint per voxel, measured on this host: the fusion
+# volume (tsdf f32 + weight u8 = 5 B), the weight-gate copy, two float64
+# distance transforms, the label map, float32 casts of the transforms, and
+# scipy's internal EDT workspace.  On a 69.5M-cell grid this summed past
+# 3.8 GB and the OOM killer terminated the build mid-mesh.  We size the
+# grid against this figure so a build degrades to a grid that fits instead
+# of taking the whole box down.
+_PEAK_BYTES_PER_VOXEL = 56
+
+
+def _ram_budget_bytes() -> int:
+    """Bytes of voxel grid the solidity pass may occupy.
+
+    Budgeted against *available* RAM at the moment the grid is sized, with
+    40% held in reserve for the kernel, the rest of the process, and the
+    stages after fusion.  Off-Linux (or unreadable /proc/meminfo) we fall
+    back to a conservative 2 GB.
+    """
+    available = read_meminfo().get("MemAvailable", 0.0)
+    if available <= 0.0:
+        return int(2.0 * 1024 ** 3)
+    return int(available * (1024 ** 3) * 0.6)
 
 
 def _depth_files(cfg: ReconConfig, views: List[Dict[str, Any]]) -> Dict[str, Path]:
@@ -157,10 +180,24 @@ def _volume_bounds(cfg: ReconConfig, views: List[Dict[str, Any]],
     pad = (hi - lo) * 0.02 + 1e-6
     lo, hi = lo - pad, hi + pad
     extent = hi - lo
-    voxel = float(extent.max()) / cfg.mesh_resolution
-    dims = np.clip(np.ceil(extent / voxel - 1e-9).astype(np.int64), 1,
-                   cfg.mesh_resolution)
-    total = int(np.prod(dims))
+
+    # Fit the grid to free RAM.  When the subject fills the volume (an
+    # orbit does - the crop cannot shrink a shell that spans every axis),
+    # the solidity pass's two float64 distance transforms and their casts
+    # scale directly with the voxel count and overrun a small box.  Walk
+    # the resolution down until the estimated peak fits the budget; only
+    # the longest axis is pinned to `resolution`, so a flat subject keeps
+    # the other axes small for free.
+    resolution = max(128, int(cfg.mesh_resolution))
+    budget = _ram_budget_bytes()
+    while True:
+        voxel = float(extent.max()) / resolution
+        dims = np.clip(np.ceil(extent / voxel - 1e-9).astype(np.int64), 1,
+                       resolution)
+        total = int(np.prod(dims))
+        if resolution <= 128 or total * _PEAK_BYTES_PER_VOXEL <= budget:
+            break
+        resolution = max(128, int(resolution * 0.9))
     if total > _MAX_GRID_VOXELS:
         raise ReconstructionError(
             f"Mesh grid would be {dims.tolist()} = {total} voxels, above the "
@@ -174,6 +211,9 @@ def _volume_bounds(cfg: ReconConfig, views: List[Dict[str, Any]],
         "voxel": voxel,
         "dims": tuple(int(x) for x in dims),
         "total_voxels": total,
+        "resolution_used": resolution,
+        "resolution_requested": int(cfg.mesh_resolution),
+        "ram_budget_gb": round(budget / (1024 ** 3), 2),
         "bounds_lo": [round(float(x), 4) for x in lo],
         "bounds_hi": [round(float(x), 4) for x in hi],
         "extent": [round(float(x), 4) for x in extent],
@@ -777,6 +817,21 @@ def run_mesh(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str
     ctx.set_command(
         f"in-process TSDF fusion + marching cubes ({len(depth_paths)} depth "
         f"maps, grid <= {cfg.mesh_resolution}^3)")
+
+    def _log_mem(label: str) -> None:
+        """Persist an RSS/available snapshot to the pipeline log.
+
+        The per-stage memory record only lived in memory and vanished with
+        every OOM kill, leaving the failure undiagnosable.  Writing the
+        trace to the log means the next overrun shows exactly which
+        allocation climbed.
+        """
+        info = memory_pressure(cfg.ram_limit_gb)
+        ctx.log(f"mem {label}: rss {info['process_rss_gb']} GB "
+                f"(peak {info['process_peak_gb']} GB), "
+                f"avail {info['available_gb']} GB",
+                stage="mesh", operation="memory")
+
     ctx.log(f"meshing from {len(depth_paths)} depth maps "
             f"(crop {cfg.mesh_crop}x, resolution {cfg.mesh_resolution})")
 
@@ -794,10 +849,17 @@ def run_mesh(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str
         )
     volume = _volume_bounds(cfg, views, points)
     del points
-    ctx.note(f"volume {volume['dims']} @ {volume['voxel']:.3f} units "
-             f"(crop {'on' if volume['crop']['applied'] else 'off'})")
+    if volume["resolution_used"] < volume["resolution_requested"]:
+        ctx.log(f"grid sized to fit RAM: {volume['dims']} = "
+                f"{volume['total_voxels']} voxels at resolution "
+                f"{volume['resolution_used']} (requested "
+                f"{volume['resolution_requested']}), budget "
+                f"{volume['ram_budget_gb']} GB",
+                stage="mesh", operation="memory")
+    _log_mem("volume-sized")
 
     tsdf, weight, fuse_stats = _fuse(cfg, views, depth_paths, volume, ctx)
+    _log_mem("post-fuse")
     if fuse_stats["updates"] == 0:
         raise ReconstructionError(
             "Depth fusion produced no samples inside the volume.",
@@ -814,8 +876,12 @@ def run_mesh(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str
     fuse_stats["weight_gate"] = cfg.mesh_min_weight
     fuse_stats["gate_kept_of_covered"] = round(
         int(kept.sum()) / max(1, covered), 4)
-    tsdf = np.where(kept, tsdf, np.float32(1.0))
+    # In-place: np.where would allocate a second full-grid copy while the
+    # first is still live (peak +total voxels).  Writing the rejected
+    # voxels straight into tsdf is identical and frees that spike.
+    tsdf[~kept] = np.float32(1.0)
     del weight, kept, covered
+    _log_mem("post-weight-gate")
     ctx.note(f"weight gate >= {cfg.mesh_min_weight}: "
              f"{fuse_stats['gate_kept_of_covered']:.0%} of covered voxels")
     ctx.check()
@@ -828,6 +894,7 @@ def run_mesh(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str
     if cfg.mesh_solidify:
         tsdf, solid_stats = _solidify(tsdf, cfg, ctx)
         solid_stats["applied"] = True
+        _log_mem("post-solidify")
         # _solidify cropped the grid to the occupied region, so the
         # extracted vertices are relative to the crop, not the full
         # volume.  Shift the origin by the crop offset (in world units)
