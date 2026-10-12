@@ -47,6 +47,7 @@ Outputs
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -730,6 +731,19 @@ def _sweep_one_view(cfg: ReconConfig, views: List[Dict[str, Any]],
 def run_dense(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[str, Any]:
     cv2 = _cv2()  # noqa: F841  (import applies CPU/thread policy from config)
     views = load_views(cfg)
+    # Dense cost is linear in swept views.  A multi-minute clip registers
+    # hundreds of near-duplicate ones, so when the operator caps the sweep,
+    # keep an evenly spread stride rather than the first N (a walk-around
+    # taken in order would otherwise lose whole sides of the subject).
+    # 0 - the default - sweeps every registered view.
+    cap = int(getattr(cfg, "dense_max_views", 0) or 0)
+    if cap and len(views) > cap:
+        stride = len(views) / float(cap)
+        keep = sorted({min(len(views) - 1, int(i * stride))
+                       for i in range(cap)})
+        ctx.note(f"dense_max_views={cap}: sweeping {len(keep)} of "
+                 f"{len(views)} registered views (even stride)")
+        views = [views[i] for i in keep]
     points = _sparse_cloud(cfg)
     frames = _frames_by_name(cfg)
     cfg.d("dense").mkdir(parents=True, exist_ok=True)
@@ -796,7 +810,11 @@ def run_dense(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[st
 
     todo = [i for i in range(len(views))
             if not _depth_path(cfg, views[i]["name"]).is_file()]
-    workers = max(1, min(3, int(getattr(cfg, "threads", 2) or 2)))
+    # Views are independent, so this stage scales with cores.  The old
+    # min(3, threads=2) left half the box idle on the one stage that
+    # dominates wall time; working frames are <=600px, so 4 workers still
+    # sit far below the OOM margin.
+    workers = max(1, min(int(os.cpu_count() or 2), 4))
     ctx.note(f"sweeping {len(todo)} views on {workers} workers "
              f"({reused} reused from cache)")
     done_count = 0

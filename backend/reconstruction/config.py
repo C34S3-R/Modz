@@ -343,6 +343,12 @@ class ReconConfig:
     dense_block: int = 16              # px grid for per-pixel depth ranges
     dense_ncc_window: int = 9          # NCC support window (odd)
     dense_min_ncc: float = 0.25        # confidence gate for a depth pixel
+    # Cap on how many registered views receive a depth sweep.  Dense cost is
+    # linear in swept views, and a multi-minute clip registers hundreds of
+    # near-duplicate ones: 384 views would run for hours while 40-80 well
+    # spread views already rebuild a complete solid (13-27 views produced
+    # watertight meshes in practice).  0 sweeps every registered view.
+    dense_max_views: int = 0
     target_triangles: int = 40000
     texture_size: int = 1024
     # --- foreground masking ------------------------------------------------
@@ -481,6 +487,7 @@ class ReconConfig:
             dense_min_parallax=_f("RECON_DENSE_MIN_PARALLAX", 0.02),
             dense_block=_i("RECON_DENSE_BLOCK", 16),
             dense_min_ncc=_f("RECON_DENSE_MIN_NCC", 0.25),
+            dense_max_views=_i("RECON_DENSE_MAX_VIEWS", 0),
             mesh_crop=_f("RECON_MESH_CROP", 1.5),
             mesh_resolution=_i("RECON_MESH_RESOLUTION", 448),
             mesh_trunc_voxels=_f("RECON_MESH_TRUNC_VOXELS", 4.0),
@@ -633,7 +640,7 @@ class ReconConfig:
             f"{k}={getattr(self, k)}" for k in (
                 "dense_neighbors", "dense_max_size", "dense_step_px",
                 "dense_max_planes", "dense_min_parallax", "dense_block",
-                "dense_ncc_window", "dense_min_ncc",
+                "dense_ncc_window", "dense_min_ncc", "dense_max_views",
                 "mask_background", "mask_backend", "mask_model",
             ))
 
