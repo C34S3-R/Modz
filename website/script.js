@@ -734,6 +734,65 @@ function renderAddFiles(p) {
 
 // ----- Project detail -----
 
+// The free-photo hunt spans an async request, but every WS/SSE progress event
+// rebuilds the whole project view (see the Live.on handler at the bottom).
+// Storing the query, results and ticked set here means the panel is rebuilt
+// from state instead of vanishing: previously a progress event landing while
+// the search was in flight replaced `huntGrid`, so the response wrote into an
+// orphaned node and the results silently disappeared ("the search closed").
+const hunt = { query: "", data: null, picked: new Set(), searching: false, error: null };
+
+// Re-resolve the live grid by id: the captured node may already be detached.
+function currentHuntGrid() {
+  const box = document.getElementById("hunt-results");
+  return (box && box.firstElementChild) || null;
+}
+
+function renderHunt(grid, projectId) {
+  if (!grid) return;
+  grid.replaceChildren();
+  if (hunt.searching) {
+    grid.append(el("div", { class: "muted" }, "Searching free sources..."));
+    return;
+  }
+  if (hunt.error) {
+    grid.append(el("div", { class: "muted" }, hunt.error));
+    return;
+  }
+  const data = hunt.data;
+  if (!data) return;
+  if (!data.results || !data.results.length) {
+    grid.append(el("div", { class: "muted" },
+      `No free photos found for "${data.query}". Try another name.`));
+    return;
+  }
+  const picked = hunt.picked;
+  const imgBtn = el("button", { class: "btn btn-primary mt" },
+    `Import Selected (${picked.size})`);
+  for (const r of data.results) {
+    const img = el("img", { src: r.thumbnail_url || r.image_url, alt: r.title, loading: "lazy" });
+    const box = el("input", { type: "checkbox", checked: picked.has(r.image_url) });
+    box.addEventListener("change", () => {
+      if (box.checked) picked.add(r.image_url);
+      else picked.delete(r.image_url);
+      imgBtn.textContent = `Import Selected (${picked.size})`;
+    });
+    const card = el("label", { class: "hunt-card" }, box, img,
+      el("div", { class: "hunt-title" }, r.title),
+      el("div", { class: "muted" }, `${r.source} · ${r.license}`));
+    grid.append(card);
+  }
+  imgBtn.addEventListener("click", async () => {
+    if (!picked.size) return toast("Tick at least one photo first", "warn");
+    try {
+      await API.importSources(projectId, [...picked]);
+      toast(`${picked.size} photo(s) imported`, "ok");
+      refreshProject(projectId);
+    } catch (e) { toast(e.message, "err"); }
+  });
+  grid.append(imgBtn);
+}
+
 views.project = function renderProjectDetail() {
   const p = state.currentProject;
   if (!p) return el("div", { class: "card muted" }, "Project not found.");
@@ -776,46 +835,36 @@ views.project = function renderProjectDetail() {
   // Free online hunt (Openverse + Wikimedia Commons, no key): search by
   // matatu name, tick the photos that show the same vehicle, import them.
   const huntInput = el("input", { type: "text", placeholder: "Search free photos: e.g. Syndicate matatu", style: "flex:1" });
+  huntInput.value = hunt.query;   // typed text survives a live re-render
   const huntResults = el("div", { id: "hunt-results", class: "mt" });
   const huntGrid = el("div", { class: "hunt-grid" });
   huntResults.append(huntGrid);
+  renderHunt(huntGrid, p.id);     // rebuild any previous results from state
   async function runHunt() {
     const q = (huntInput.value || "").trim();
     if (q.length < 2) return toast("Type at least 2 characters to search", "warn");
-    huntGrid.replaceChildren(el("div", { class: "muted" }, "Searching free sources..."));
+    hunt.query = q;
+    hunt.searching = true;
+    hunt.error = null;
+    renderHunt(currentHuntGrid() || huntGrid, p.id);
     let data;
     try { data = await API.searchImages(q); }
-    catch (e) { huntGrid.replaceChildren(el("div", { class: "muted" }, `Search failed: ${e.message}`)); return; }
-    huntGrid.replaceChildren();
-    if (!data.results || !data.results.length) {
-      huntGrid.append(el("div", { class: "muted" }, `No free photos found for "${data.query}". Try another name.`));
+    catch (e) {
+      hunt.searching = false;
+      hunt.error = `Search failed: ${e.message}`;
+      renderHunt(currentHuntGrid() || huntGrid, p.id);
       return;
     }
-    const picked = new Set();
-    const imgBtn = el("button", { class: "btn btn-primary mt" }, "Import Selected (0)");
-    for (const r of data.results) {
-      const img = el("img", { src: r.thumbnail_url || r.image_url, alt: r.title, loading: "lazy" });
-      const box = el("input", { type: "checkbox" });
-      box.addEventListener("change", () => {
-        if (box.checked) picked.add(r.image_url);
-        else picked.delete(r.image_url);
-        imgBtn.textContent = `Import Selected (${picked.size})`;
-      });
-      const card = el("label", { class: "hunt-card" }, box, img,
-        el("div", { class: "hunt-title" }, r.title),
-        el("div", { class: "muted" }, `${r.source} · ${r.license}`));
-      huntGrid.append(card);
-    }
-    imgBtn.addEventListener("click", async () => {
-      if (!picked.size) return toast("Tick at least one photo first", "warn");
-      try {
-        await API.importSources(p.id, [...picked]);
-        toast(`${picked.size} photo(s) imported`, "ok");
-        refreshProject(p.id);
-      } catch (e) { toast(e.message, "err"); }
-    });
-    huntGrid.append(imgBtn);
+    hunt.searching = false;
+    hunt.data = data;
+    hunt.picked = new Set();
+    // A progress event may have replaced the grid while the request was in
+    // flight, so re-resolve it by id instead of writing to the captured node.
+    renderHunt(currentHuntGrid() || huntGrid, p.id);
   }
+  huntInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); runHunt(); }
+  });
   v.append(el("div", { class: "card mt" },
     el("div", { class: "panel-label" }, "Inputs"),
     supplied.length ? el("div", { class: "file-tree" }, supplied.map((f) => el("div", { class: "file" }, f.name || f)))
@@ -1700,6 +1749,19 @@ document.getElementById("menu-btn").addEventListener("click", () => {
 
 window.addEventListener("hashchange", renderRoute);
 
+// A busy pipeline pushes several progress events per second.  Rebuilding the
+// whole route for each one made the page look like it was refreshing itself
+// and destroyed whatever the user was in the middle of doing.  Coalesce bursts
+// into a single render; a trailing timer keeps the last event visible.
+let routeRenderTimer = null;
+function scheduleRouteRender(delay = 400) {
+  if (routeRenderTimer) return;
+  routeRenderTimer = setTimeout(() => {
+    routeRenderTimer = null;
+    renderRoute();
+  }, delay);
+}
+
 Live.on((msg) => {
   // Backend push: { project_id, stage, operation, progress, status, log?, error? }
   if (msg.type === "export_update") return;
@@ -1716,7 +1778,7 @@ Live.on((msg) => {
   if (currentId && String(msg.project_id) === currentId) {
     state.projectStatus = { ...state.projectStatus, ...msg };
   }
-  if (["project", "processing", "dashboard", "logs"].includes(state.route)) renderRoute();
+  if (["project", "processing", "dashboard", "logs"].includes(state.route)) scheduleRouteRender();
 });
 
 Promise.all([loadProjects(), loadSettings()]).then(renderRoute);
