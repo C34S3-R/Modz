@@ -12,36 +12,55 @@ else
   PYTHON="python3"
 fi
 
-# Default to loopback. The server is started on the machine doing the
-# processing, so it should listen on that machine - not on whatever interface
-# happens to exist. Sniffing a non-loopback address here also meant a box with
-# Tailscale bound to its 100.x address, which nobody else can reach, and every
-# interface this listens on is an unauthenticated admin/file API.
+# Default to this machine's own address. Modz runs on whichever box is doing
+# the processing, so it should advertise that box - a routable address on it
+# that the same machine and anything else on its LAN can reach. Not loopback
+# (which locks every other device out), and not a synthesized overlay address
+# such as Tailscale's 100.x, which only tailnet peers can reach and which is
+# meaningless on somebody else's laptop.
 #
-#   HOST=127.0.0.1   loopback only (default)
-#   HOST=0.0.0.0     every interface
-#   HOST=<ip>        a specific interface
-#   HOST=auto        old behaviour: sniff a non-loopback address, Tailscale
-#                    (100.*) preferred, for a remote operator on the same tailnet
-if [[ -z "${HOST:-}" ]]; then
-  HOST="127.0.0.1"
-elif [[ "$HOST" == "auto" ]]; then
-  HOST=""
-  for address in $(hostname -I 2>/dev/null); do
-    case "$address" in
-      100.*) HOST="$address"; break ;;
+#   HOST=<unset>    this machine's own non-loopback address (default)
+#   HOST=loopback   this machine only - 127.0.0.1
+#   HOST=auto       old behaviour: prefer Tailscale (100.*) when present
+#   HOST=0.0.0.0    every interface
+#   HOST=<ip>       one specific address
+own_address() {
+  local addr
+  for addr in $(hostname -I 2>/dev/null); do
+    case "$addr" in
+      127.*|::1|100.*) ;;
+      *) printf '%s' "$addr"; return 0 ;;
     esac
   done
-  if [[ -z "$HOST" ]]; then
-    for address in $(hostname -I 2>/dev/null); do
-      case "$address" in
-        127.*|::1) ;;
-        *) HOST="$address"; break ;;
-      esac
+  # No LAN address (offline, or interface still coming up): take the tailnet
+  # address rather than nothing, so the box is still reachable remotely.
+  for addr in $(hostname -I 2>/dev/null); do
+    case "$addr" in
+      100.*) printf '%s' "$addr"; return 0 ;;
+    esac
+  done
+  printf '127.0.0.1'
+}
+
+case "${HOST:-}" in
+  "") HOST="$(own_address)" ;;
+  loopback) HOST="127.0.0.1" ;;
+  auto)
+    HOST=""
+    for addr in $(hostname -I 2>/dev/null); do
+      case "$addr" in 100.*) HOST="$addr"; break ;; esac
     done
-  fi
-  HOST="${HOST:-0.0.0.0}"
-fi
+    if [[ -z "$HOST" ]]; then
+      for addr in $(hostname -I 2>/dev/null); do
+        case "$addr" in
+          127.*|::1) ;;
+          *) HOST="$addr"; break ;;
+        esac
+      done
+    fi
+    HOST="${HOST:-0.0.0.0}"
+    ;;
+esac
 
 if ! "$PYTHON" -c 'import fastapi, multipart, uvicorn' >/dev/null 2>&1; then
   cat >&2 <<EOF
