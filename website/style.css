@@ -4,18 +4,24 @@
    and prefers-reduced-motion turns all of it off. */
 
 :root {
-  --bg: #0b0e13;
-  --bg-soft: #10141b;
-  --card: #141923;
-  --card-2: #1a2130;
-  --border: #232b3a;
-  --border-hi: #2f3a4f;
-  --fg: #e9ecf4;
-  --fg-dim: #97a1b4;
-  --fg-faint: #67718a;
-  --accent: #5b8cff;
-  --accent-2: #9b6cff;
-  --accent-glow: rgba(91, 140, 255, 0.45);
+  /* Modz Vehicle Lab, themed to match the Homer dashboard ("olive lab"):
+     charcoal canvas + dark-olive cards + sage/lime accents in dark mode,
+     sage canvas + white cards + dark-olive chrome in light mode. Every value
+     here is a colours.* token from Homer's public/assets/config.yml. */
+  --bg: #2b2b2b;                 /* Homer dark background */
+  --bg-soft: #262626;
+  --card: #3d4127;               /* Homer dark card-background */
+  --card-2: #464a30;
+  --border: #4c5136;
+  --border-hi: #5d6342;
+  --fg: #d4d4d4;                 /* Homer dark text */
+  --fg-dim: #bac095;             /* Homer dark text-subtitle (sage) */
+  --fg-faint: #adb38d;
+  --accent: #bac095;             /* Homer dark link */
+  --accent-2: #d4de95;           /* Homer dark link-hover (lime) */
+  --accent-rgb: 186, 192, 149;
+  --accent-glow: rgba(186, 192, 149, 0.45);
+  --on-accent: #2b2b2b;          /* the accent is light in dark mode */
   --ok: #3ecf8e;
   --ok-glow: rgba(62, 207, 142, 0.5);
   --warn: #f0a63c;
@@ -28,42 +34,39 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-2: 0 10px 30px -12px rgba(0, 0, 0, 0.65);
 
-  /* Surfaces that used to be hardcoded hexes. Keeping them here is what lets
-     the light theme below be a pure variable redefinition instead of a second
-     copy of every rule - each value is byte-identical to the old literal. */
-  --sidebar-bg: linear-gradient(180deg, #10151e, #0d1118);
-  --panel-bg: rgba(20, 25, 35, 0.72);   /* sidebar status block */
-  --topbar-bg: rgba(16, 20, 27, 0.82);
-  --field-bg: #090c11;                  /* progress track + meters */
-  --code-bg: #090c10;                   /* pre/code */
-  --detail-bg: #0a0e14;                 /* collapsible detail panels */
-  --log-bg: #0a0d11;                    /* pipeline log */
-  --btn-bg: linear-gradient(180deg, #1a2130, #161c28);
-  --popover-bg: rgba(26, 33, 48, 0.94); /* toasts */
-  --overlay-bg: rgba(5, 8, 12, 0.7);    /* modal scrim */
+  --sidebar-bg: linear-gradient(180deg, #41452a, #373b22);
+  --panel-bg: rgba(61, 65, 39, 0.72);
+  --topbar-bg: rgba(38, 38, 38, 0.88);
+  --field-bg: #232323;
+  --code-bg: #232323;
+  --detail-bg: #232323;
+  --log-bg: #232323;
+  --btn-bg: linear-gradient(180deg, #4a4e33, #414529);
+  --popover-bg: rgba(74, 78, 51, 0.96);
+  --overlay-bg: rgba(20, 20, 20, 0.72);
 
-  --hover: rgba(255, 255, 255, 0.035);
-  --hover-soft: rgba(255, 255, 255, 0.025);
-  --grid-line: rgba(255, 255, 255, 0.018);
-  --card-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.022), transparent 44%);
-  --card-sheen-2: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%);
-  --modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%);
-  --btn-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-  --card-hi: linear-gradient(90deg, transparent, rgba(140, 170, 255, 0.32), transparent);
-  --log-shadow: inset 0 0 70px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(91, 140, 255, 0.07);
+  --hover: rgba(212, 212, 212, 0.06);
+  --hover-soft: rgba(212, 212, 212, 0.04);
+  --grid-line: rgba(186, 192, 149, 0.06);
+  --card-sheen: linear-gradient(180deg, rgba(212, 212, 212, 0.03), transparent 44%);
+  --card-sheen-2: linear-gradient(180deg, rgba(212, 212, 212, 0.04), transparent 30%);
+  --modal-sheen: linear-gradient(180deg, rgba(212, 212, 212, 0.04), transparent 30%);
+  --btn-sheen: inset 0 1px 0 rgba(212, 212, 212, 0.07);
+  --card-hi: linear-gradient(90deg, transparent, rgba(186, 192, 149, 0.35), transparent);
+  --log-shadow: inset 0 0 70px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(186, 192, 149, 0.10);
 
-  --scroll-thumb: #2b3548;
-  --scroll-thumb-hi: #3a4761;
-  --nav-active-bg: linear-gradient(90deg, rgba(91, 140, 255, 0.16), rgba(91, 140, 255, 0.04) 70%, transparent);
-  --nav-active-fg: #fff;                /* only safe while that bg is dark */
-  --accent-tint: rgba(91, 140, 255, 0.10);
-  --accent-tint-2: rgba(155, 108, 255, 0.08);
-  --selection-bg: rgba(91, 140, 255, 0.35);
-  --logo-from: #dfe8ff;
-  --logo-glow: rgba(91, 140, 255, 0.35);
-  --stat-grad: linear-gradient(120deg, #eef2ff, #b9c9ff 70%);
-  --hero-bg: linear-gradient(180deg, #161c28, #11151e);
-  --pct-grad: linear-gradient(120deg, #edf2ff 15%, var(--accent) 58%, var(--accent-2));
+  --scroll-thumb: #4c5136;
+  --scroll-thumb-hi: #5d6342;
+  --nav-active-bg: linear-gradient(90deg, rgba(186, 192, 149, 0.16), rgba(186, 192, 149, 0.04) 70%, transparent);
+  --nav-active-fg: #ffffff;
+  --accent-tint: rgba(186, 192, 149, 0.10);
+  --accent-tint-2: rgba(212, 222, 149, 0.08);
+  --selection-bg: rgba(186, 192, 149, 0.35);
+  --logo-from: #edefc9;
+  --logo-glow: rgba(186, 192, 149, 0.35);
+  --stat-grad: linear-gradient(120deg, #edefc9, #bac095 70%);
+  --hero-bg: linear-gradient(180deg, #464a30, #3a3e26);
+  --pct-grad: linear-gradient(120deg, #edefc9 15%, var(--accent) 58%, var(--accent-2));
 }
 
 /* ---------- Light theme ----------
@@ -72,60 +75,62 @@
    every surface in the rules below already rides var(), so this block is the
    whole theme. Set with <html data-theme="light"> (see script.js). */
 :root[data-theme="light"] {
-  --bg: #edf1fb;
-  --bg-soft: #e6ebf9;
+  --bg: #bac095;                 /* Homer light background (sage canvas) */
+  --bg-soft: #b2b98c;
   --card: #ffffff;
-  --card-2: #f7f9fe;
-  --border: #d4dbf0;
-  --border-hi: #bcc7e8;
-  --fg: #1a2131;
-  --fg-dim: #4c566b;
-  --fg-faint: #6d778e;
-  --accent: #3b5bdb;
-  --accent-2: #7048e8;
-  --accent-glow: rgba(59, 91, 219, 0.35);
-  --ok: #158f5e;
-  --ok-glow: rgba(21, 143, 94, 0.35);
-  --warn: #b77515;
-  --warn-glow: rgba(183, 117, 21, 0.35);
-  --err: #d6394a;
-  --err-glow: rgba(214, 57, 74, 0.35);
-  --shadow-1: 0 1px 2px rgba(31, 41, 70, 0.14);
-  --shadow-2: 0 12px 32px -16px rgba(31, 41, 70, 0.35);
+  --card-2: #f7f8ee;
+  --border: #d3d8b4;
+  --border-hi: #b8bf90;
+  --fg: #3d4127;                 /* Homer light text (dark olive) */
+  --fg-dim: #636b2f;
+  --fg-faint: #727a39;
+  --accent: #3d4127;             /* Homer light link */
+  --accent-2: #636b2f;           /* Homer light link-hover */
+  --accent-rgb: 61, 65, 39;
+  --accent-glow: rgba(61, 65, 39, 0.35);
+  --on-accent: #ffffff;          /* the accent is dark in light mode */
+  --ok: #2f7d55;
+  --ok-glow: rgba(47, 125, 85, 0.4);
+  --warn: #9a6512;
+  --warn-glow: rgba(154, 101, 18, 0.4);
+  --err: #b93b47;
+  --err-glow: rgba(185, 59, 71, 0.4);
+  --shadow-1: 0 1px 2px rgba(45, 50, 30, 0.18);
+  --shadow-2: 0 12px 32px -16px rgba(45, 50, 30, 0.4);
 
-  --sidebar-bg: linear-gradient(180deg, #ffffff, #eef2fd);
-  --panel-bg: rgba(255, 255, 255, 0.9);
-  --topbar-bg: rgba(255, 255, 255, 0.88);
-  --field-bg: #f4f7ff;
-  --code-bg: #f2f5fd;
-  --detail-bg: #f2f5fd;
-  --log-bg: #f2f5fd;
-  --btn-bg: linear-gradient(180deg, #ffffff, #eef2fd);
+  --sidebar-bg: linear-gradient(180deg, #ffffff, #f2f5e2);
+  --panel-bg: rgba(255, 255, 255, 0.92);
+  --topbar-bg: rgba(255, 255, 255, 0.92);
+  --field-bg: #f6f8ea;
+  --code-bg: #f2f4e2;
+  --detail-bg: #f2f4e2;
+  --log-bg: #f2f4e2;
+  --btn-bg: linear-gradient(180deg, #ffffff, #f0f3de);
   --popover-bg: rgba(255, 255, 255, 0.97);
-  --overlay-bg: rgba(237, 241, 251, 0.72);
+  --overlay-bg: rgba(186, 192, 149, 0.72);
 
-  --hover: rgba(59, 91, 219, 0.08);
-  --hover-soft: rgba(59, 91, 219, 0.05);
-  --grid-line: rgba(26, 33, 49, 0.055);
-  --card-sheen: linear-gradient(180deg, rgba(59, 91, 219, 0.05), transparent 44%);
-  --card-sheen-2: linear-gradient(180deg, rgba(59, 91, 219, 0.06), transparent 30%);
-  --modal-sheen: linear-gradient(180deg, rgba(59, 91, 219, 0.05), transparent 30%);
-  --btn-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  --card-hi: linear-gradient(90deg, transparent, rgba(59, 91, 219, 0.3), transparent);
-  --log-shadow: inset 0 0 70px rgba(31, 41, 70, 0.10), 0 0 0 1px rgba(59, 91, 219, 0.12);
+  --hover: rgba(61, 65, 39, 0.09);
+  --hover-soft: rgba(61, 65, 39, 0.06);
+  --grid-line: rgba(61, 65, 39, 0.07);
+  --card-sheen: linear-gradient(180deg, rgba(61, 65, 39, 0.06), transparent 44%);
+  --card-sheen-2: linear-gradient(180deg, rgba(61, 65, 39, 0.07), transparent 30%);
+  --modal-sheen: linear-gradient(180deg, rgba(61, 65, 39, 0.06), transparent 30%);
+  --btn-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --card-hi: linear-gradient(90deg, transparent, rgba(61, 65, 39, 0.3), transparent);
+  --log-shadow: inset 0 0 70px rgba(45, 50, 30, 0.10), 0 0 0 1px rgba(61, 65, 39, 0.14);
 
-  --scroll-thumb: #c3ccea;
-  --scroll-thumb-hi: #a6b3e3;
-  --nav-active-bg: linear-gradient(90deg, rgba(59, 91, 219, 0.14), rgba(59, 91, 219, 0.04) 70%, transparent);
-  --nav-active-fg: #2f3e7a;
-  --accent-tint: rgba(59, 91, 219, 0.10);
-  --accent-tint-2: rgba(112, 72, 232, 0.08);
-  --selection-bg: rgba(59, 91, 219, 0.22);
-  --logo-from: #2f3e7a;
-  --logo-glow: rgba(59, 91, 219, 0.35);
-  --stat-grad: linear-gradient(120deg, #2f3e7a, #7048e8 70%);
-  --hero-bg: linear-gradient(180deg, #ffffff, #eef2fd);
-  --pct-grad: linear-gradient(120deg, #2f3e7a 15%, var(--accent) 58%, var(--accent-2));
+  --scroll-thumb: #c3c8a0;
+  --scroll-thumb-hi: #a9af82;
+  --nav-active-bg: linear-gradient(90deg, rgba(61, 65, 39, 0.14), rgba(61, 65, 39, 0.04) 70%, transparent);
+  --nav-active-fg: #3d4127;
+  --accent-tint: rgba(61, 65, 39, 0.10);
+  --accent-tint-2: rgba(99, 107, 47, 0.09);
+  --selection-bg: rgba(99, 107, 47, 0.25);
+  --logo-from: #3d4127;
+  --logo-glow: rgba(61, 65, 39, 0.35);
+  --stat-grad: linear-gradient(120deg, #3d4127, #636b2f 70%);
+  --hero-bg: linear-gradient(180deg, #ffffff, #f0f3de);
+  --pct-grad: linear-gradient(120deg, #3d4127 15%, #636b2f 58%, #8a9340);
 }
 
 * { box-sizing: border-box; }
@@ -447,15 +452,15 @@ body::after {
 }
 .btn:hover:not(:disabled) {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(91, 140, 255, 0.22), 0 6px 18px -8px var(--accent-glow);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.22), 0 6px 18px -8px var(--accent-glow);
   transform: translateY(-1px);
 }
 .btn:active:not(:disabled) { transform: translateY(0) scale(0.985); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent), #7d5bff);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border-color: transparent;
-  color: #fff;
+  color: var(--on-accent);
   box-shadow: 0 5px 18px -8px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .btn-primary:hover:not(:disabled) {
@@ -553,15 +558,15 @@ body::after {
   overflow: hidden;
 }
 .build-hero[data-status="running"] {
-  border-color: rgba(91, 140, 255, 0.55);
+  border-color: rgba(var(--accent-rgb), 0.55);
   animation: heroPulse 2.8s ease-in-out infinite alternate;
 }
 .build-hero[data-status="failed"],
 .build-hero[data-status="cancelled"] { border-color: rgba(239, 93, 106, 0.55); }
 .build-hero[data-status="paused"] { border-color: rgba(240, 166, 60, 0.5); }
 @keyframes heroPulse {
-  from { box-shadow: 0 10px 30px -20px rgba(91, 140, 255, 0.45); }
-  to { box-shadow: 0 12px 36px -14px rgba(91, 140, 255, 0.8); }
+  from { box-shadow: 0 10px 30px -20px rgba(var(--accent-rgb), 0.45); }
+  to { box-shadow: 0 12px 36px -14px rgba(var(--accent-rgb), 0.8); }
 }
 .build-hero-row { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
 .build-pct-wrap { display: flex; flex-direction: column; min-width: 108px; }
@@ -783,7 +788,7 @@ input[type="text"], input[type="number"], input[type="password"], select, textar
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.16);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.16);
 }
 fieldset { border: 1px solid var(--border); border-radius: 9px; padding: 11px 13px; margin: 0 0 12px; }
 legend { font-size: 0.72rem; color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.12em; padding: 0 7px; }

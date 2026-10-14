@@ -1755,7 +1755,7 @@ document.getElementById("menu-btn").addEventListener("click", () => {
 // dashboard, so the two read as one product.
 // ---------------------------------------------------------------------------
 const THEME_KEY = "modz-theme";
-const THEME_COLOR = { dark: "#0b0e13", light: "#edf1fb" };
+const THEME_COLOR = { dark: "#2b2b2b", light: "#bac095" };
 
 function applyTheme(theme) {
   const t = theme === "light" ? "light" : "dark";
