@@ -11,7 +11,7 @@
 ## Deployment context
 
 - `/home/admin/modz` is the persistent **Matatu vehicle-processing server**, not the Ollama/Qwen AI server. Keep its process, port, database, and configuration separate; do not modify or restart Ollama/Qwen while working on this repository. A separate operator machine reaches the Matatu host through SSH; do not treat this checkout as disposable local state or move `server.db`/project workspaces to an ephemeral working directory.
-- The launcher selects a non-loopback interface by default (preferring Tailscale, then the first LAN address) so the separate operator machine can reach it. For direct network access, set `HOST` explicitly, use a strong `API_TOKEN`, and restrict the port with a firewall; never expose unauthenticated admin/file APIs to an untrusted network.
+- The launcher binds loopback (`127.0.0.1`) by default, because the server runs on the machine doing the processing. Set `HOST` explicitly to listen elsewhere: `HOST=0.0.0.0` for every interface, an explicit address for one, or `HOST=auto` to sniff a non-loopback address (preferring Tailscale, for a remote operator on the same tailnet). Whichever you choose, use a strong `API_TOKEN` and restrict the port with a firewall; never expose unauthenticated admin/file APIs to an untrusted network.
 
 ## Run and verify
 

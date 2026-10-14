@@ -12,18 +12,27 @@ else
   PYTHON="python3"
 fi
 
-# Bind a real server interface by default. Prefer Tailscale when present so a
-# remote operator can reach the host without opening every interface.
+# Default to loopback. The server is started on the machine doing the
+# processing, so it should listen on that machine - not on whatever interface
+# happens to exist. Sniffing a non-loopback address here also meant a box with
+# Tailscale bound to its 100.x address, which nobody else can reach, and every
+# interface this listens on is an unauthenticated admin/file API.
+#
+#   HOST=127.0.0.1   loopback only (default)
+#   HOST=0.0.0.0     every interface
+#   HOST=<ip>        a specific interface
+#   HOST=auto        old behaviour: sniff a non-loopback address, Tailscale
+#                    (100.*) preferred, for a remote operator on the same tailnet
 if [[ -z "${HOST:-}" ]]; then
+  HOST="127.0.0.1"
+elif [[ "$HOST" == "auto" ]]; then
+  HOST=""
   for address in $(hostname -I 2>/dev/null); do
     case "$address" in
-      100.*)
-        HOST="$address"
-        break
-        ;;
+      100.*) HOST="$address"; break ;;
     esac
   done
-  if [[ -z "${HOST:-}" ]]; then
+  if [[ -z "$HOST" ]]; then
     for address in $(hostname -I 2>/dev/null); do
       case "$address" in
         127.*|::1) ;;
