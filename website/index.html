@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="color-scheme" content="dark" />
+  <meta name="color-scheme" content="dark light" />
   <meta name="theme-color" content="#0b0e13" />
   <title>Modz 3D Lab</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%235b8cff'/%3E%3Cstop offset='1' stop-color='%239b6cff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath fill='url(%23g)' d='M16 2l12 7v14l-12 7L4 23V9z'/%3E%3Cpath fill='%230b0e13' d='M16 8l6 3.5v7L16 22l-6-3.5v-7z'/%3E%3C/svg%3E" />
@@ -55,7 +55,10 @@
     <main id="main">
       <header id="topbar">
         <h1 id="page-title">Dashboard</h1>
-        <div id="backend-badge" class="badge badge-warn">Backend: offline</div>
+        <div id="topbar-right">
+          <div id="backend-badge" class="badge badge-warn">Backend: offline</div>
+          <button id="theme-btn" class="icon-btn" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9680;</button>
+        </div>
       </header>
       <div id="view"></div>
     </main>
@@ -123,6 +126,6 @@
 
   <div id="toasts"></div>
 
-  <script type="module" src="script.js?v=8"></script>
+  <script type="module" src="script.js?v=9"></script>
 </body>
 </html>

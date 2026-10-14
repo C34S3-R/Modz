@@ -27,6 +27,105 @@
   --radius: 12px;
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-2: 0 10px 30px -12px rgba(0, 0, 0, 0.65);
+
+  /* Surfaces that used to be hardcoded hexes. Keeping them here is what lets
+     the light theme below be a pure variable redefinition instead of a second
+     copy of every rule - each value is byte-identical to the old literal. */
+  --sidebar-bg: linear-gradient(180deg, #10151e, #0d1118);
+  --panel-bg: rgba(20, 25, 35, 0.72);   /* sidebar status block */
+  --topbar-bg: rgba(16, 20, 27, 0.82);
+  --field-bg: #090c11;                  /* progress track + meters */
+  --code-bg: #090c10;                   /* pre/code */
+  --detail-bg: #0a0e14;                 /* collapsible detail panels */
+  --log-bg: #0a0d11;                    /* pipeline log */
+  --btn-bg: linear-gradient(180deg, #1a2130, #161c28);
+  --popover-bg: rgba(26, 33, 48, 0.94); /* toasts */
+  --overlay-bg: rgba(5, 8, 12, 0.7);    /* modal scrim */
+
+  --hover: rgba(255, 255, 255, 0.035);
+  --hover-soft: rgba(255, 255, 255, 0.025);
+  --grid-line: rgba(255, 255, 255, 0.018);
+  --card-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.022), transparent 44%);
+  --card-sheen-2: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%);
+  --modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%);
+  --btn-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --card-hi: linear-gradient(90deg, transparent, rgba(140, 170, 255, 0.32), transparent);
+  --log-shadow: inset 0 0 70px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(91, 140, 255, 0.07);
+
+  --scroll-thumb: #2b3548;
+  --scroll-thumb-hi: #3a4761;
+  --nav-active-bg: linear-gradient(90deg, rgba(91, 140, 255, 0.16), rgba(91, 140, 255, 0.04) 70%, transparent);
+  --nav-active-fg: #fff;                /* only safe while that bg is dark */
+  --accent-tint: rgba(91, 140, 255, 0.10);
+  --accent-tint-2: rgba(155, 108, 255, 0.08);
+  --selection-bg: rgba(91, 140, 255, 0.35);
+  --logo-from: #dfe8ff;
+  --logo-glow: rgba(91, 140, 255, 0.35);
+  --stat-grad: linear-gradient(120deg, #eef2ff, #b9c9ff 70%);
+  --hero-bg: linear-gradient(180deg, #161c28, #11151e);
+  --pct-grad: linear-gradient(120deg, #edf2ff 15%, var(--accent) 58%, var(--accent-2));
+}
+
+/* ---------- Light theme ----------
+   The same "indigo lab" palette as the Homer dashboard's light mode
+   (#EDF1FB canvas / #FFFFFF cards / #3B5BDB links). Nothing but variables:
+   every surface in the rules below already rides var(), so this block is the
+   whole theme. Set with <html data-theme="light"> (see script.js). */
+:root[data-theme="light"] {
+  --bg: #edf1fb;
+  --bg-soft: #e6ebf9;
+  --card: #ffffff;
+  --card-2: #f7f9fe;
+  --border: #d4dbf0;
+  --border-hi: #bcc7e8;
+  --fg: #1a2131;
+  --fg-dim: #4c566b;
+  --fg-faint: #6d778e;
+  --accent: #3b5bdb;
+  --accent-2: #7048e8;
+  --accent-glow: rgba(59, 91, 219, 0.35);
+  --ok: #158f5e;
+  --ok-glow: rgba(21, 143, 94, 0.35);
+  --warn: #b77515;
+  --warn-glow: rgba(183, 117, 21, 0.35);
+  --err: #d6394a;
+  --err-glow: rgba(214, 57, 74, 0.35);
+  --shadow-1: 0 1px 2px rgba(31, 41, 70, 0.14);
+  --shadow-2: 0 12px 32px -16px rgba(31, 41, 70, 0.35);
+
+  --sidebar-bg: linear-gradient(180deg, #ffffff, #eef2fd);
+  --panel-bg: rgba(255, 255, 255, 0.9);
+  --topbar-bg: rgba(255, 255, 255, 0.88);
+  --field-bg: #f4f7ff;
+  --code-bg: #f2f5fd;
+  --detail-bg: #f2f5fd;
+  --log-bg: #f2f5fd;
+  --btn-bg: linear-gradient(180deg, #ffffff, #eef2fd);
+  --popover-bg: rgba(255, 255, 255, 0.97);
+  --overlay-bg: rgba(237, 241, 251, 0.72);
+
+  --hover: rgba(59, 91, 219, 0.08);
+  --hover-soft: rgba(59, 91, 219, 0.05);
+  --grid-line: rgba(26, 33, 49, 0.055);
+  --card-sheen: linear-gradient(180deg, rgba(59, 91, 219, 0.05), transparent 44%);
+  --card-sheen-2: linear-gradient(180deg, rgba(59, 91, 219, 0.06), transparent 30%);
+  --modal-sheen: linear-gradient(180deg, rgba(59, 91, 219, 0.05), transparent 30%);
+  --btn-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --card-hi: linear-gradient(90deg, transparent, rgba(59, 91, 219, 0.3), transparent);
+  --log-shadow: inset 0 0 70px rgba(31, 41, 70, 0.10), 0 0 0 1px rgba(59, 91, 219, 0.12);
+
+  --scroll-thumb: #c3ccea;
+  --scroll-thumb-hi: #a6b3e3;
+  --nav-active-bg: linear-gradient(90deg, rgba(59, 91, 219, 0.14), rgba(59, 91, 219, 0.04) 70%, transparent);
+  --nav-active-fg: #2f3e7a;
+  --accent-tint: rgba(59, 91, 219, 0.10);
+  --accent-tint-2: rgba(112, 72, 232, 0.08);
+  --selection-bg: rgba(59, 91, 219, 0.22);
+  --logo-from: #2f3e7a;
+  --logo-glow: rgba(59, 91, 219, 0.35);
+  --stat-grad: linear-gradient(120deg, #2f3e7a, #7048e8 70%);
+  --hero-bg: linear-gradient(180deg, #ffffff, #eef2fd);
+  --pct-grad: linear-gradient(120deg, #2f3e7a 15%, var(--accent) 58%, var(--accent-2));
 }
 
 * { box-sizing: border-box; }
@@ -48,10 +147,10 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(900px 520px at 12% -12%, rgba(91, 140, 255, 0.10), transparent 62%),
-    radial-gradient(820px 620px at 106% 112%, rgba(155, 108, 255, 0.08), transparent 58%),
-    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+    radial-gradient(900px 520px at 12% -12%, var(--accent-tint), transparent 62%),
+    radial-gradient(820px 620px at 106% 112%, var(--accent-tint-2), transparent 58%),
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: auto, auto, 44px 44px, 44px 44px;
 }
 body::after {
@@ -60,23 +159,23 @@ body::after {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background: radial-gradient(560px 320px at 28% -4%, rgba(91, 140, 255, 0.10), transparent 66%);
+  background: radial-gradient(560px 320px at 28% -4%, var(--accent-tint), transparent 66%);
   animation: breathe 9s ease-in-out infinite alternate;
 }
 @keyframes breathe { from { opacity: 0.45; } to { opacity: 1; } }
 
-::selection { background: rgba(91, 140, 255, 0.35); color: #fff; }
+::selection { background: var(--selection-bg); color: var(--fg); }
 
-* { scrollbar-width: thin; scrollbar-color: #2b3548 transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) transparent; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #2b3548;
+  background: var(--scroll-thumb);
   border-radius: 99px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
-::-webkit-scrollbar-thumb:hover { background-color: #3a4761; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hi); }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -86,7 +185,7 @@ body::after {
 #sidebar {
   width: 232px;
   flex: 0 0 232px;
-  background: linear-gradient(180deg, #10151e, #0d1118);
+  background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -100,11 +199,11 @@ body::after {
   gap: 9px;
   font-weight: 700;
   letter-spacing: 0.14em;
-  background: linear-gradient(120deg, #dfe8ff, var(--accent) 60%, var(--accent-2));
+  background: linear-gradient(120deg, var(--logo-from), var(--accent) 60%, var(--accent-2));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 0 14px rgba(91, 140, 255, 0.35));
+  filter: drop-shadow(0 0 14px var(--logo-glow));
 }
 .logo-mark {
   width: 13px;
@@ -146,10 +245,10 @@ body::after {
   font-size: 0.92rem;
   transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
-#nav a:hover { background: rgba(255, 255, 255, 0.035); color: var(--fg); transform: translateX(2px); }
+#nav a:hover { background: var(--hover); color: var(--fg); transform: translateX(2px); }
 #nav a.active {
-  background: linear-gradient(90deg, rgba(91, 140, 255, 0.16), rgba(91, 140, 255, 0.04) 70%, transparent);
-  color: #fff;
+  background: var(--nav-active-bg);
+  color: var(--nav-active-fg);
   border-left-color: var(--accent);
   box-shadow: inset 0 0 22px -14px var(--accent-glow);
 }
@@ -168,7 +267,7 @@ body::after {
 
 .sidebar-status {
   margin-top: auto;
-  background: rgba(20, 25, 35, 0.72);
+  background: var(--panel-bg);
   backdrop-filter: blur(6px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -247,12 +346,22 @@ body::after {
   justify-content: space-between;
   padding: 15px 26px;
   border-bottom: 1px solid var(--border);
-  background: rgba(16, 20, 27, 0.82);
+  background: var(--topbar-bg);
   backdrop-filter: blur(10px);
-  box-shadow: 0 1px 0 rgba(91, 140, 255, 0.10), 0 14px 30px -22px rgba(0, 0, 0, 0.9);
+  box-shadow: 0 1px 0 var(--accent-tint), 0 14px 30px -22px rgba(0, 0, 0, 0.9);
 }
 #topbar h1 { font-size: 1.15rem; margin: 0; letter-spacing: 0.02em; }
 #topbar h1::before { content: "▍"; color: var(--accent); margin-right: 8px; text-shadow: 0 0 10px var(--accent-glow); }
+#topbar-right { display: flex; align-items: center; gap: 14px; }
+/* Light/dark switch - sits beside the backend badge, same shape as the
+   modal close button. script.js flips <html data-theme> and remembers it. */
+#theme-btn {
+  font-size: 1.05rem;
+  padding: 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+#theme-btn:hover { color: var(--accent); border-color: var(--accent); transform: none; }
 
 #view { padding: 22px 26px 64px; }
 /* Route-change entrance only: live updates rebuild #view without this class,
@@ -283,7 +392,7 @@ body::after {
 .card {
   position: relative;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.022), transparent 44%),
+    var(--card-sheen),
     var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -298,7 +407,7 @@ body::after {
   left: 16px;
   right: 16px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(140, 170, 255, 0.32), transparent);
+  background: var(--card-hi);
   opacity: 0.55;
   transition: opacity 0.18s ease;
 }
@@ -330,10 +439,10 @@ body::after {
   padding: 8px 15px;
   border-radius: 9px;
   border: 1px solid var(--border-hi);
-  background: linear-gradient(180deg, var(--card-2), #161c28);
+  background: var(--btn-bg);
   color: var(--fg);
   cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  box-shadow: var(--btn-sheen);
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease, filter 0.15s ease;
 }
 .btn:hover:not(:disabled) {
@@ -371,7 +480,7 @@ body::after {
 .progress {
   position: relative;
   height: 12px;
-  background: #090c11;
+  background: var(--field-bg);
   border: 1px solid var(--border);
   border-radius: 999px;
   overflow: hidden;
@@ -439,8 +548,8 @@ body::after {
   border: 1px solid var(--border-hi);
   border-radius: var(--radius);
   background:
-    radial-gradient(460px 130px at 6% 0%, rgba(91, 140, 255, 0.12), transparent 70%),
-    linear-gradient(180deg, #161c28, #11151e);
+    radial-gradient(460px 130px at 6% 0%, var(--accent-tint), transparent 70%),
+    var(--hero-bg);
   overflow: hidden;
 }
 .build-hero[data-status="running"] {
@@ -462,11 +571,11 @@ body::after {
   line-height: 1;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
-  background: linear-gradient(120deg, #edf2ff 15%, var(--accent) 58%, var(--accent-2));
+  background: var(--pct-grad);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 0 16px rgba(91, 140, 255, 0.4));
+  filter: drop-shadow(0 0 16px var(--logo-glow));
 }
 .build-pct-label {
   margin-top: 5px;
@@ -542,7 +651,7 @@ body::after {
   font-size: 0.9rem;
   transition: background 0.15s ease, transform 0.15s ease;
 }
-.pipeline li:hover { background: rgba(255, 255, 255, 0.03); transform: translateX(3px); }
+.pipeline li:hover { background: var(--hover); transform: translateX(3px); }
 .pipe-icon {
   position: relative;
   z-index: 1;
@@ -607,7 +716,7 @@ body::after {
 
 /* ---------- Logs ---------- */
 .log-panel {
-  background: #090c10;
+  background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 12px 14px;
@@ -642,7 +751,7 @@ body::after {
   transition: background 0.14s ease;
 }
 .file-row:last-child { border-bottom: none; }
-.file-row:hover { background: rgba(255, 255, 255, 0.025); }
+.file-row:hover { background: var(--hover-soft); }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
@@ -655,7 +764,7 @@ th {
   border-bottom-color: var(--border-hi);
 }
 tbody tr { transition: background 0.14s ease; }
-tbody tr:hover { background: rgba(255, 255, 255, 0.025); }
+tbody tr:hover { background: var(--hover-soft); }
 tbody tr:last-child td { border-bottom: none; }
 
 /* ---------- Forms / modal ---------- */
@@ -664,7 +773,7 @@ input[type="text"], input[type="number"], input[type="password"], select, textar
   width: 100%;
   margin-top: 5px;
   padding: 9px 11px;
-  background: #0a0e14;
+  background: var(--detail-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--fg);
@@ -684,7 +793,7 @@ legend { font-size: 0.72rem; color: var(--fg-faint); text-transform: uppercase; 
 #modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(5, 8, 12, 0.7);
+  background: var(--overlay-bg);
   backdrop-filter: blur(5px);
   display: flex;
   align-items: center;
@@ -697,7 +806,7 @@ legend { font-size: 0.72rem; color: var(--fg-faint); text-transform: uppercase; 
   max-height: 90vh;
   overflow: auto;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%),
+    var(--modal-sheen),
     var(--card);
   border: 1px solid var(--border-hi);
   border-radius: 14px;
@@ -713,7 +822,7 @@ legend { font-size: 0.72rem; color: var(--fg-faint); text-transform: uppercase; 
 /* ---------- Toasts ---------- */
 #toasts { position: fixed; bottom: 18px; right: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
 .toast {
-  background: rgba(26, 33, 48, 0.94);
+  background: var(--popover-bg);
   backdrop-filter: blur(6px);
   border: 1px solid var(--border-hi);
   border-left: 3px solid var(--accent);
@@ -737,10 +846,10 @@ legend { font-size: 0.72rem; color: var(--fg-faint); text-transform: uppercase; 
   width: 100%;
   height: 460px;
   display: block;
-  background: #0a0d11;
+  background: var(--log-bg);
   border: 1px solid var(--border-hi);
   border-radius: var(--radius);
-  box-shadow: inset 0 0 70px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(91, 140, 255, 0.07);
+  box-shadow: var(--log-shadow);
 }
 .viewer-placeholder {
   position: absolute;
@@ -767,7 +876,7 @@ legend { font-size: 0.72rem; color: var(--fg-faint); text-transform: uppercase; 
   font-size: 1.5rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  background: linear-gradient(120deg, #eef2ff, #b9c9ff 70%);
+  background: var(--stat-grad);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -783,7 +892,7 @@ legend { font-size: 0.72rem; color: var(--fg-faint); text-transform: uppercase; 
 .meter {
   margin-top: 11px;
   height: 6px;
-  background: #090c11;
+  background: var(--field-bg);
   border: 1px solid var(--border);
   border-radius: 999px;
   overflow: hidden;
@@ -837,7 +946,7 @@ legend { font-size: 0.72rem; color: var(--fg-faint); text-transform: uppercase; 
   #sidebar.open { transform: translateX(0); box-shadow: 0 0 40px rgba(0, 0, 0, 0.6); }
   #menu-btn {
     display: flex; flex-direction: column; gap: 4px;
-    background: rgba(16, 20, 27, 0.82); border: 1px solid var(--border); border-radius: 7px;
+    background: var(--topbar-bg); border: 1px solid var(--border); border-radius: 7px;
     padding: 9px; cursor: pointer;
     position: fixed; top: 14px; left: 14px; z-index: 45;
     backdrop-filter: blur(6px);

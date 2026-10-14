@@ -1747,6 +1747,39 @@ document.getElementById("menu-btn").addEventListener("click", () => {
   document.getElementById("sidebar").classList.toggle("open");
 });
 
+// ---------------------------------------------------------------------------
+// Light / dark theme
+// Dark is the default, so the shipped look is unchanged until someone flips
+// it. The choice is remembered per browser. Both palettes come from one place
+// (website/style.css :root and :root[data-theme="light"]) and match the Homer
+// dashboard, so the two read as one product.
+// ---------------------------------------------------------------------------
+const THEME_KEY = "modz-theme";
+const THEME_COLOR = { dark: "#0b0e13", light: "#edf1fb" };
+
+function applyTheme(theme) {
+  const t = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = t;
+  const btn = document.getElementById("theme-btn");
+  if (btn) {
+    const next = t === "dark" ? "light" : "dark";
+    btn.setAttribute("aria-label", `Switch to ${next} theme`);
+    btn.title = `Switch to ${next} theme`;
+  }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", THEME_COLOR[t]);
+}
+
+let storedTheme = null;
+try { storedTheme = localStorage.getItem(THEME_KEY); } catch (_) { /* private mode */ }
+applyTheme(storedTheme);
+
+document.getElementById("theme-btn").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  try { localStorage.setItem(THEME_KEY, next); } catch (_) { /* private mode */ }
+  applyTheme(next);
+});
+
 window.addEventListener("hashchange", renderRoute);
 
 // A busy pipeline pushes several progress events per second.  Rebuilding the
