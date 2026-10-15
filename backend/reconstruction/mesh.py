@@ -67,7 +67,7 @@ _WEIGHT_CAP = 64          # averaging cap; early estimates stop counting
 # scipy's internal EDT workspace.  On a 69.5M-cell grid this summed past
 # 3.8 GB and the OOM killer terminated the build mid-mesh.  We size the
 # grid against this figure so a build degrades to a grid that fits instead
-# of taking the whole box down.
+# of taking the whole machine down.
 _PEAK_BYTES_PER_VOXEL = 56
 
 
@@ -184,7 +184,7 @@ def _volume_bounds(cfg: ReconConfig, views: List[Dict[str, Any]],
     # Fit the grid to free RAM.  When the subject fills the volume (an
     # orbit does - the crop cannot shrink a shell that spans every axis),
     # the solidity pass's two float64 distance transforms and their casts
-    # scale directly with the voxel count and overrun a small box.  Walk
+    # scale directly with the voxel count and overrun a small machine.  Walk
     # the resolution down until the estimated peak fits the budget; only
     # the longest axis is pinned to `resolution`, so a flat subject keeps
     # the other axes small for free.

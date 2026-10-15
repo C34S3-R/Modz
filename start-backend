@@ -12,9 +12,10 @@ else
   PYTHON="python3"
 fi
 
-# Default to this machine's own address. Modz runs on whichever box is doing
-# the processing, so it should advertise that box - a routable address on it
-# that the same machine and anything else on its LAN can reach. Not loopback
+# Default to this machine's own address. Modz runs on whichever machine is
+# doing the processing, so it should advertise that machine - a routable
+# address on it, reachable by that host and anything else on its LAN. Not
+# loopback
 # (which locks every other device out), and not a synthesized overlay address
 # such as Tailscale's 100.x, which only tailnet peers can reach and which is
 # meaningless on somebody else's laptop.
@@ -33,7 +34,7 @@ own_address() {
     esac
   done
   # No LAN address (offline, or interface still coming up): take the tailnet
-  # address rather than nothing, so the box is still reachable remotely.
+  # address rather than nothing, so the machine is still reachable remotely.
   for addr in $(hostname -I 2>/dev/null); do
     case "$addr" in
       100.*) printf '%s' "$addr"; return 0 ;;

@@ -202,8 +202,9 @@ if __name__ == "__main__":
 
         Mirrors own_address() in start-backend so the two entry points agree:
         the first address that is neither loopback nor a Tailscale 100.*
-        address.  Modz runs on whichever box is doing the processing, so it
-        advertises that box - a loopback default would lock every other
+        address.  Modz runs on whichever machine is doing the
+        processing, so it advertises that machine - a loopback default would
+        lock every other
         device out, and a tailnet address is meaningless on a laptop that has
         no Tailscale.  Nothing here is a literal address on purpose: whoever
         clones this repo gets their own machine's address, never the

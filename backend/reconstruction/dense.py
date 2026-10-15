@@ -811,10 +811,10 @@ def run_dense(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dict[st
     todo = [i for i in range(len(views))
             if not _depth_path(cfg, views[i]["name"]).is_file()]
     # Views are independent, so this stage scales with cores - but each
-    # worker holds its own working set, so on a small box RAM is what bounds
-    # it.  Bounding by min(cores, RAM budget) leaves this 6 GB host at the 4
-    # workers it was proven with while letting a bigger box sweep far more
-    # views at once, where the old cap of 4 stopped it regardless.
+    # worker holds its own working set, so on a small machine RAM is what
+    # bounds it.  Bounding by min(cores, RAM budget) leaves this 6 GB host at
+    # the 4 workers it was proven with while letting a larger machine sweep
+    # far more views at once, where the old cap of 4 stopped it regardless.
     workers = max(1, min(int(os.cpu_count() or 2),
                          max(1, int(round(cfg.ram_limit_gb)))))
     ctx.note(f"sweeping {len(todo)} views on {workers} workers "
