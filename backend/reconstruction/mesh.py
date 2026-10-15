@@ -372,8 +372,34 @@ def _extract(tsdf: np.ndarray, voxel: float, origin: np.ndarray
             details={"error": str(exc)},
         ) from exc
 
+    # Marching cubes only emits cells that fit inside the array, so a solid
+    # that reaches the wall has its surface cut off where the grid ends -
+    # 129 open edges on a wall-touching test box, hundreds in practice,
+    # because the solidity pass crops to the occupied region and therefore
+    # always touches at least one face.  Pad one voxel of the field's own
+    # "outside" so a cell exists beyond the edge and the shell closes around
+    # the volume instead of stopping at its silhouette.  Without this the
+    # surface ships open no matter what the hole-filling passes do later.
+    outside = float(tsdf.max())
+    if outside <= 0.0:
+        # Every voxel is occupied, so there is no free space for the shell to
+        # close *into*.  Padding with a positive constant here would invent a
+        # surface at the array wall and quietly ship a hollow box the size of
+        # the volume; the check above only covers the "no negative voxels"
+        # case, not this one.  Fail on the real cause instead.
+        raise ReconstructionError(
+            "No surface: every voxel of the TSDF is occupied.",
+            suggestion="The fusion never saw free space - check "
+                       "dense/dense_meta.json coverage; a volume cropped "
+                       "tighter than the object leaves nowhere for the "
+                       "shell to close against.",
+            details={"tsdf_max": outside,
+                     "occupied_voxels": int((tsdf <= 0.0).sum())},
+        )
+    padded = np.pad(tsdf, 1, mode="constant", constant_values=outside)
     verts, faces, _normals, _values = marching_cubes(
-        tsdf, level=0.0, spacing=(voxel, voxel, voxel))
+        padded, level=0.0, spacing=(voxel, voxel, voxel))
+    verts -= np.float32(voxel)   # undo the one-voxel pad offset
     # skimage positions voxel (i, j, k) at i*spacing; our voxel *centre* i
     # sits at origin + (i + 0.5) * voxel.
     world = verts.astype(np.float32) + origin + np.float32(0.5 * voxel)

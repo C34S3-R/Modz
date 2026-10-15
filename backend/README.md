@@ -28,7 +28,8 @@ in an `async def` route handler.
 - `api/` contains thin HTTP adapters; it should not contain processing logic.
 - `pipeline/` contains stage implementations and the checkpoint runner.
 - `reconstruction/` is the standalone CPU-only reconstruction engine (full
-  plan: video/photos → sparse → dense → mesh → low-poly → texture →
+  plan: video/photos → sparse → dense → mesh → solidify (watertight gate) →
+  low-poly → texture →
   `.bussidmod`, checkpointed in `reconstruction/project_state.json`) with
   its own CLI; see `reconstruction/README.md`. It is wired into the web
   pipeline: the `meshroom` stage runs it through the texture stage and

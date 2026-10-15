@@ -160,7 +160,8 @@ def _reconstruct_engine(ctx: PipelineContext) -> Dict[str, Any]:
     # Extra artifacts for the file browser (downloads).  Registered under
     # their own roots, which model_file() never scans, so they cannot
     # shadow the bridged model.
-    for rel, kind in (("mesh/raw/mesh.ply", "model"),
+    for rel, kind in (("mesh/solid/mesh_solid.ply", "model"),
+                      ("mesh/raw/mesh.ply", "model"),
                       ("lowpoly/lowpoly.ply", "model"),
                       ("texture/textured.obj", "model"),
                       ("texture/texture.png", "texture"),

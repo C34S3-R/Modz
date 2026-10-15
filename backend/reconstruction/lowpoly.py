@@ -67,11 +67,17 @@ def _compact(verts: np.ndarray, faces: np.ndarray
 
 def run_lowpoly(cfg: ReconConfig, store: StateStore,
                 ctx: StageContext) -> Dict[str, Any]:
-    src = cfg.d("mesh", "raw", "mesh.ply")
+    # The solid, not the raw extract.  Solidify is the stage that promises a
+    # watertight body; decimating mesh/raw/mesh.ply instead would quietly
+    # discard that promise from the very model the user downloads, which is
+    # how a "completed" run used to ship a hollow shell.
+    src = cfg.d("mesh", "solid", "mesh_solid.ply")
     if not src.is_file():
         raise ReconstructionError(
-            "Low-poly stage needs the raw mesh (mesh/raw/mesh.ply).",
-            suggestion="Run the pipeline through the 'mesh' stage first.",
+            "Low-poly stage needs the solid (mesh/solid/mesh_solid.ply).",
+            suggestion="Run the pipeline through the 'solidify' stage first; "
+                       "it closes the raw mesh's boundary loops and refuses "
+                       "to pass a shell that is not watertight.",
             details={"project": str(cfg.project_dir)},
         )
     out_dir = cfg.d("lowpoly")
@@ -160,6 +166,45 @@ def run_lowpoly(cfg: ReconConfig, store: StateStore,
         )
     ctx.check()
 
+    # QEM strands small islands as it collapses edges: the solid goes in as
+    # one body and 34 come out, so the model that ships would be speckled
+    # with detached debris.  Keep the largest body - physical connectivity,
+    # so a face touching the shell across a non-manifold edge is kept rather
+    # than torn out - and record what was dropped.  This is a guarantee, not
+    # an optimisation: if it cannot run, the stage fails rather than quietly
+    # shipping a speckled model, the same bargain solidify makes.
+    body_stats: Dict[str, Any] = {"components": 1, "faces_dropped": 0}
+    if len(rgb_out) != len(verts_out):
+        raise ReconstructionError(
+            "Low-poly body cleanup cannot run: the colour array does not "
+            f"match the decimated mesh ({len(rgb_out)} vs {len(verts_out)}).",
+            suggestion="Colour transfer needs scipy's cKDTree; install "
+                       "scipy (python3 -m pip install scipy) and retry the "
+                       "stage. Shipping without the cleanup would re-fragment "
+                       "a solid into QEM's detached islands.",
+            details={"vertices": int(len(verts_out)),
+                     "colours": int(len(rgb_out))},
+        )
+    try:
+        from .solidify import keep_largest_body
+        verts_out, faces_out, rgb_out, body_stats = keep_largest_body(
+            verts_out, faces_out, rgb_out, len(verts_out))
+    except Exception as exc:
+        raise ReconstructionError(
+            f"Low-poly body cleanup failed: {exc}",
+            suggestion="The decimated mesh cannot be reduced to a single "
+                       "body, so it would ship fragmented. Check that scipy "
+                       "is installed and mesh/ is not truncated, then retry "
+                       "this stage - it is cheap (seconds).",
+            details={"vertices": int(len(verts_out)),
+                     "faces": int(len(faces_out))},
+        ) from exc
+    if body_stats.get("applied"):
+        ctx.note(f"low-poly: kept largest of "
+                 f"{body_stats.get('components')} bodies "
+                 f"(-{body_stats.get('faces_dropped')} faces)")
+    ctx.check()
+
     out = write_ply_mesh(out_path, verts_out, faces_out, rgb_out)
     ctx.add_output_files([out])
 
@@ -177,6 +222,7 @@ def run_lowpoly(cfg: ReconConfig, store: StateStore,
         "vertices": int(len(verts_out)),
         "faces": int(len(faces_out)),
         "reduction": round(1.0 - len(faces_out) / max(1, len(faces)), 4),
+        "bodies": body_stats,
         "colour_transfer_p95": round(transfer_p95, 5),
         "output": str(out.relative_to(cfg.project_dir)),
         "elapsed_seconds": round(time.time() - started, 2),
@@ -197,6 +243,8 @@ def run_lowpoly(cfg: ReconConfig, store: StateStore,
         "faces": meta["faces"],
         "target_triangles": target,
         "decimated": decimated,
+        "bodies": body_stats.get("components"),
+        "faces_dropped": body_stats.get("faces_dropped"),
         "elapsed_seconds": meta["elapsed_seconds"],
     }
     ctx.result(result)

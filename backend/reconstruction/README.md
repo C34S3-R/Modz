@@ -20,10 +20,29 @@ Design priority order: correctness, low memory, recoverability — **not** speed
 | 6 | `sfm` | `sfm.py` | `sparse/*.ply`, `sparse/sparse_preview.png`, `sfm/sfm.json`, `reconstruction_report.json` |
 | 7 | `dense` | `dense.py` | `dense/<frame>.npz` (depth/ncc/agreement), `dense/dense_point_cloud.ply`, `dense/dense_meta.json` |
 | 8 | `mesh` | `mesh.py` | `mesh/raw/mesh.ply` (vertices+faces+colours), `mesh/mesh_meta.json` |
-| 9 | `lowpoly` | `lowpoly.py` | `lowpoly/lowpoly.ply` (decimated + colours), `lowpoly/lowpoly_meta.json` |
-| 10 | `texture` | `texture.py` | `texture/texture.png`, `texture/textured.obj`, `texture/textured.mtl`, `texture/texture_meta.json` |
-| 11 | `blender` | `blender.py` | `blender/prepared_textured.obj` + sidecars, `blender/blender_meta.json` |
-| 12 | `bussid` | `bussid.py` | `bussid/*` (model+sidecars+manifest.json), `exports/<id>.bussidmod`, `exports/result.json`, `bussid/bussid_meta.json` |
+| 9 | `solidify` | `solidify.py` | `mesh/solid/mesh_solid.ply` (watertight, single body), `mesh/solid/solid_meta.json` — **gates on watertightness** |
+| 10 | `lowpoly` | `lowpoly.py` | `lowpoly/lowpoly.ply` (decimated + colours, **one body**), `lowpoly/lowpoly_meta.json` |
+| 11 | `texture` | `texture.py` | `texture/texture.png`, `texture/textured.obj`, `texture/textured.mtl`, `texture/texture_meta.json` |
+| 12 | `blender` | `blender.py` | `blender/prepared_textured.obj` + sidecars, `blender/blender_meta.json` |
+| 13 | `bussid` | `bussid.py` | `bussid/*` (model+sidecars+manifest.json), `exports/<id>.bussidmod`, `exports/result.json`, `bussid/bussid_meta.json` |
+
+`solidify` sits between `mesh` and `lowpoly` on purpose: it closes every
+remaining boundary loop, keeps one body, and **fails the stage** unless the
+result is watertight, so the decimator and the texture bake downstream can
+only ever read a guaranteed solid. Meshing itself pads the grid so a solid
+reaching the array wall is not cut off there; `solidify` handles whatever is
+left and is the step that makes the watertightness claim checkable.
+
+QEM re-introduces fragmentation of its own: collapsing edges strands small
+islands, so a solid entering the decimator as one body left it as 34
+(measured on `engine_test_14`). `lowpoly` therefore drops every body but the
+largest before writing, using *physical* connectivity — faces touching the
+shell across a non-manifold edge are attached, not debris, and dropping them
+would tear holes into a mesh that was closed. One caveat worth knowing: the
+decimator also bakes non-manifold edges (shared by four or more faces) that
+no hole-filling can repair. Those are invisible when rendering and harmless
+to BUSSID, but they are why the guarantee stops at *watertight solid* +
+*single body* rather than claiming manifoldness for the decimated mesh.
 
 Each stage records start/end, command, exit code, stdout/stderr, memory and a
 human-readable failure reason in `logs/stage_<name>.json`; the engine
@@ -41,7 +60,8 @@ projects/<id>/
   sparse/                        sparse_point_cloud.ply, cameras.ply, preview.png
   dense/                         per-view depth maps (.npz), fused coloured
                                  point cloud, dense_meta.json
-  mesh/  lowpoly/  texture/      raw mesh, decimated mesh, atlas + OBJ/MTL
+  mesh/  lowpoly/  texture/      raw mesh (+ mesh/solid solid), decimated
+                                 mesh, atlas + OBJ/MTL
   blender/                       prepared model (Blender output or logged
                                  model-copy fallback) + blender_meta.json
   bussid/                        final model + sidecars + manifest.json
@@ -583,8 +603,8 @@ These are measurements, not opinions:
   engine finishes, the hook copies `textured.obj`, `textured.mtl` and
   `texture.png` **verbatim** into `reconstruction/` (same names, so
   `mtllib`/`map_Kd` resolve — `mesh_validation` fails the stage if a
-  material reference dangles) and registers them, plus the mesh/lowpoly
-  point clouds and the report for the file browser.  `model_file()`
+  material reference dangles) and registers them, plus the solid, mesh and
+  lowpoly point clouds and the report for the file browser.  `model_file()`
   prefers `blender/ > bussid/ > reconstruction/ > input/`, so the
   bridged model is what blender/lights/bussid/export consume without
   any of them knowing the engine exists.

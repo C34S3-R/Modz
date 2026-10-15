@@ -21,6 +21,7 @@ Stages implemented so far, per the phasing plan:
     Phase 3  sfm (poses, bundle adjustment, sparse cloud, reports)
     Phase 4  dense (plane-sweep depth maps + fused point cloud)
     Phase 5  mesh (TSDF fusion + marching cubes + vertex colours)
+    Phase 5b solidify (boundary-loop closure + watertight gate -> mesh/solid/)
     Phase 6  lowpoly (QEM decimation to the preset's triangle budget)
     Phase 7  texture (hand-rolled UV atlas + frame bake)
     Phase 8  blender (optional headless cleanup, logged model-copy fallback)
@@ -60,6 +61,7 @@ STAGE_PIPELINE: tuple[tuple[str, Callable], ...] = (
     ("sfm", None),
     ("dense", None),
     ("mesh", None),
+    ("solidify", None),
     ("lowpoly", None),
     ("texture", None),
     ("blender", None),
@@ -69,7 +71,7 @@ STAGE_PIPELINE: tuple[tuple[str, Callable], ...] = (
 
 def _handlers() -> Dict[str, Callable]:
     from . import (bussid, blender, dense, features, frames, lowpoly,
-                   masking, matching, mesh, sfm, texture)
+                   masking, matching, mesh, sfm, solidify, texture)
 
     return {
         "input_validation": _stage_input_validation,
@@ -81,6 +83,7 @@ def _handlers() -> Dict[str, Callable]:
         "sfm": sfm.run_sparse_multistart,
         "dense": dense.run_dense,
         "mesh": mesh.run_mesh,
+        "solidify": solidify.run_solidify,
         "lowpoly": lowpoly.run_lowpoly,
         "texture": texture.run_texture,
         "blender": blender.run_blender,

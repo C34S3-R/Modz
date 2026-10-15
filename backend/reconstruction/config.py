@@ -35,8 +35,17 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 # cached result and the fix would never run.  Keeping a version per stage
 # and folding it into that stage's fingerprint forces a re-run on code
 # changes.  MESH bumped to 2 when the support-prune was disabled on
-# solidified builds (it was shattering the watertight body).
-MESH_ALGO_VERSION = 2
+# solidified builds (it was shattering the watertight body), and to 3 when
+# marching cubes started padding the grid - a solid reaching the array wall
+# had its surface truncated there, leaving hundreds of open edges.
+MESH_ALGO_VERSION = 3
+# LOWPOLY bumped to 2 when the decimator's detached debris started being
+# dropped: a solid entering as one body was leaving QEM as 34 pieces, and
+# with no config change nothing would have rebuilt the shipped model.
+# SOLIDIFY has no constant of its own; its tag is the "|solidify|gate=v1"
+# literal inside solidify_fingerprint() below - bump that to re-gate a solid
+# after changing how boundary loops are closed.
+LOWPOLY_ALGO_VERSION = 2
 
 # Human-readable list of what actually runs. Printed once at startup so an
 # operator can see there is no hidden GPU path.
@@ -552,6 +561,7 @@ class ReconConfig:
             ("mesh", "raw"),
             ("mesh", "cleaned"),
             ("mesh", "lowpoly"),
+            ("mesh", "solid"),
             ("textures",),
             ("blender",),
             ("lights",),
@@ -661,12 +671,34 @@ class ReconConfig:
                 "mesh_solidify", "mesh_solidify_radius",
             )))
 
-    def lowpoly_fingerprint(self) -> str:
-        """Invalidates the decimated mesh when the raw mesh or the target
-        triangle budget changes; inherits everything upstream of the mesh.
+    def solidify_fingerprint(self) -> str:
+        """Invalidates the solid when the surface it has to close changes.
+
+        The closure rules live in code rather than config, so a fix there
+        would never show up in a config-derived value; the gate carries its
+        own tag for that.  Inheriting ``mesh_fingerprint`` is what makes a
+        rebuilt surface always face a fresh gate instead of reusing the verdict
+        passed on the previous, different mesh.
         """
-        return self.mesh_fingerprint() + "|lowpoly|" + "|".join(
-            f"{k}={getattr(self, k)}" for k in ("target_triangles",))
+        return self.mesh_fingerprint() + "|solidify|gate=v1"
+
+    def lowpoly_fingerprint(self) -> str:
+        """Invalidates the decimated mesh when the *solid* or the target
+        triangle budget changes.
+
+        Inheriting ``solidify_fingerprint`` rather than the mesh directly is
+        deliberate: this stage reads ``mesh/solid/mesh_solid.ply``, so a
+        change in how that file is produced has to reach it.  The chain stays
+        transitive either way (solidify inherits mesh, mesh inherits dense).
+
+        ``LOWPOLY_ALGO_VERSION`` is in here because the debris removal that
+        follows QEM is code with no config of its own - without it an old
+        speckled model would stay "valid" forever.
+        """
+        return (self.solidify_fingerprint()
+                + f"|lowpoly-v{LOWPOLY_ALGO_VERSION}|"
+                + "|".join(
+            f"{k}={getattr(self, k)}" for k in ("target_triangles",)))
 
     def texture_fingerprint(self) -> str:
         """Invalidates the bake when the decimated mesh or atlas size
@@ -710,6 +742,7 @@ class ReconConfig:
             "sfm": "sfm_fingerprint",
             "dense": "dense_fingerprint",
             "mesh": "mesh_fingerprint",
+            "solidify": "solidify_fingerprint",
             "lowpoly": "lowpoly_fingerprint",
             "texture": "texture_fingerprint",
             "blender": "blender_fingerprint",

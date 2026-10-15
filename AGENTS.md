@@ -16,7 +16,7 @@
 ## Run and verify
 
 - Install declared dependencies with `python3 -m pip install -r requirements.txt`. The current environment has no `python` alias, so use `python3` in commands.
-- Start the Matatu server with `./start-matatu` (or its equivalent `./start-backend`; the launcher resolves the repository root, prefers `.venv/bin/python`, selects a non-loopback interface, and accepts `HOST`, `PORT`, or `PYTHON_BIN`). The explicit fallback is `PYTHONPATH=backend python3 -m uvicorn main:app --host 127.0.0.1 --port 8002`. Set `API_TOKEN` before deliberately binding beyond loopback.
+- Start the Matatu server with `./start-matatu` (or its equivalent `./start-backend`; the launcher resolves the repository root, prefers `.venv/bin/python`, binds this machine's own address by default, and accepts `HOST`, `PORT`, or `PYTHON_BIN`). The explicit fallback is `PYTHONPATH=backend python3 -m uvicorn main:app --host 127.0.0.1 --port 8002`. Set `API_TOKEN` before deliberately binding beyond loopback.
 - A user systemd unit `modz-matatu.service` (enabled, `Restart=always`) runs `start-backend` on port 8002. Never run a manual server alongside it: the duplicate boots run recovery and mark the active job failed, then die on the busy port. Manage it with `systemctl --user status|restart modz-matatu`.
 - Frontend-only preview: `python3 -m http.server -d website 8080`; API/live updates are unavailable there, so offline badges are expected.
 - There is no repository test suite, lint, formatter, typecheck, CI, or task runner. Focused checks are `python3 -m py_compile $(find backend -name '*.py' -type f | sort)` and, when Node is installed, `node --check website/script.js`.
