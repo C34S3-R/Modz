@@ -251,6 +251,25 @@ class ReconConfig:
     duplicate_hamming_max: int = 2   # of 64 aHash bits (essentially identical)
     duplicate_corr_max: float = 0.992  # 16x16 thumbnail correlation
 
+    # Temporal redundancy.  The checks above ask "are these two frames the
+    # same image?" and need both signals to agree, which is the right caution
+    # across a whole video - a frame whose background dominates the hash can
+    # look alike while showing different geometry.  Locality makes a single
+    # signal safe instead: only frames within `span` of an accepted one are
+    # even considered, so a high correlation there means the same viewpoint
+    # captured again rather than coincidence.
+    #
+    # Measured on engine_test_14 frames/original: adjacent frames correlate
+    # 0.824 at the median and only 0.959 at p75, while frames eight apart
+    # fall to 0.273 - this footage is already close to irreducible, so 0.95
+    # deliberately targets only the top quarter of neighbours.  Do not lower
+    # it to chase speed: on this video the frames it would then drop are
+    # distinct viewpoints, and losing them trades away exactly the coverage
+    # the watertight-solid work exists to protect.  The first frame of every
+    # redundant run always survives, so each segment stays represented.
+    duplicate_neighbour_corr: float = 0.95
+    duplicate_neighbour_span: int = 6
+
     # --- phase 2: features + matching -------------------------------------
     # Wider sequential window (5 instead of 3) plus the keyframe hop keeps
     # the orbit connected across blurry bridge frames; without it the match
@@ -597,6 +616,27 @@ class ReconConfig:
         )
         return "|".join(f"{k}={getattr(self, k)}" for k in keys)
 
+    def selection_fingerprint(self) -> str:
+        """Invalidates frames/selected when a threshold that decides
+        inclusion moves.
+
+        Split out of ``fingerprint`` because frame_extraction and masking
+        share that one: re-extracting or re-masking every frame just because
+        a dedupe threshold changed would be pure waste, since extraction only
+        cares about fps and duration.  It also carries the quality and
+        duplicate thresholds, which the shared fingerprint omitted - so
+        lowering min_blur_score used to leave the old selection marked valid
+        forever, and the change never took effect until something else
+        invalidated it.
+        """
+        keys = (
+            "frame_interval", "max_frames",
+            "min_blur_score", "min_brightness", "max_brightness",
+            "duplicate_hamming_max", "duplicate_corr_max",
+            "duplicate_neighbour_corr", "duplicate_neighbour_span",
+        )
+        return "|".join(f"{k}={getattr(self, k)}" for k in keys)
+
     def feature_fingerprint(self) -> str:
         """Invalidates SIFT .npz files (image pixels / descriptor settings)."""
         keys = (
@@ -735,7 +775,7 @@ class ReconConfig:
         mapping = {
             "input_validation": None,
             "frame_extraction": "fingerprint",
-            "frame_selection": "fingerprint",
+            "frame_selection": "selection_fingerprint",
             "masking": "fingerprint",
             "feature_extraction": "feature_fingerprint",
             "feature_matching": "match_fingerprint",

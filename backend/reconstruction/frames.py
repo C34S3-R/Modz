@@ -325,6 +325,18 @@ def select_frames(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dic
     rejected_dir = cfg.d("frames", "rejected")
     selected_dir.mkdir(parents=True, exist_ok=True)
     rejected_dir.mkdir(parents=True, exist_ok=True)
+    # Rebuild both outputs from scratch, the way extraction clears
+    # frames/original.  _copy_into refuses to overwrite an existing
+    # destination, so a frame rejected on this pass would otherwise keep the
+    # copy a previous pass left behind - and frames/selected is what the
+    # frames digest hashes to invalidate matching, so it has to describe
+    # *this* decision and not a union of two.
+    for stale_dir in ("selected", "rejected"):
+        for stale in cfg.frames("frames", stale_dir):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
     frames = cfg.frames("frames", "original")
     if not frames:
         raise ReconstructionError(
@@ -337,6 +349,10 @@ def select_frames(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dic
     rejected: List[Dict[str, Any]] = []
     accepted_thumb: Dict[str, Any] = {}
     accepted_hash: Dict[str, Any] = {}
+    # Frame index of each accepted frame, so redundancy can be judged against
+    # *nearby* frames only - correlation with a frame across the video means
+    # something different (see duplicate_neighbour_corr in config.py).
+    accepted_at: Dict[str, int] = {}
     pressure_samples: List[Dict[str, Any]] = []
 
     for index, path in enumerate(frames, start=1):
@@ -383,6 +399,31 @@ def select_frames(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dic
                     f"{cfg.duplicate_corr_max}, aHash distance {dist} <= "
                     f"{cfg.duplicate_hamming_max})")
 
+        # Temporal redundancy: the same viewpoint captured again a few tenths
+        # of a second later.  Only frames within the neighbour span are
+        # considered, and measured on engine_test_14 frames 8 apart correlate
+        # just 0.273 at the median, so a high figure inside the span really
+        # does mean a repeat - which is why this needs one signal where the
+        # check above needs two.  Every redundant run keeps its first frame,
+        # so each segment of the video stays represented; what is dropped is
+        # pairs that cost matching time without adding geometry.
+        if not reasons and accepted_at:
+            near_name, near_corr = None, -1.0
+            for name, at in accepted_at.items():
+                gap = index - at
+                if 0 < gap <= cfg.duplicate_neighbour_span:
+                    corr = float(
+                        (m["thumbnail"] * accepted_thumb[name]).mean())
+                    if corr > near_corr:
+                        near_corr, near_name = corr, name
+            if (near_name is not None
+                    and near_corr >= cfg.duplicate_neighbour_corr):
+                reasons.append(
+                    f"redundant with {near_name} "
+                    f"({index - accepted_at[near_name]} frames back, "
+                    f"correlation {near_corr:.4f} >= "
+                    f"{cfg.duplicate_neighbour_corr})")
+
         if reasons:
             rejected.append({
                 "file": path.name,
@@ -396,6 +437,7 @@ def select_frames(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dic
             accepted_names.append(path.name)
             accepted_hash[path.name] = m["ahash"]
             accepted_thumb[path.name] = m["thumbnail"]
+            accepted_at[path.name] = index
 
         if index % 10 == 0:
             pressure = memory_pressure(cfg.ram_limit_gb)
@@ -428,6 +470,8 @@ def select_frames(cfg: ReconConfig, store: StateStore, ctx: StageContext) -> Dic
             "max_brightness": cfg.max_brightness,
             "duplicate_hamming_max": cfg.duplicate_hamming_max,
             "duplicate_corr_max": cfg.duplicate_corr_max,
+            "duplicate_neighbour_corr": cfg.duplicate_neighbour_corr,
+            "duplicate_neighbour_span": cfg.duplicate_neighbour_span,
         },
         "rejected_frames": rejected,
         "memory_pressure_samples": pressure_samples,
