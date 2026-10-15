@@ -194,6 +194,40 @@ app.mount("/", StaticFiles(directory=website_dir, html=True), name="website")
 
 
 if __name__ == "__main__":
+    import subprocess
     import uvicorn
 
-    uvicorn.run(app, host=os.getenv("HOST", "127.0.0.1"), port=int(os.getenv("PORT", "8002")))
+    def own_address() -> str:
+        """This machine's own address, for a direct `python3 backend/main.py`.
+
+        Mirrors own_address() in start-backend so the two entry points agree:
+        the first address that is neither loopback nor a Tailscale 100.*
+        address.  Modz runs on whichever box is doing the processing, so it
+        advertises that box - a loopback default would lock every other
+        device out, and a tailnet address is meaningless on a laptop that has
+        no Tailscale.  Nothing here is a literal address on purpose: whoever
+        clones this repo gets their own machine's address, never the
+        developer's.
+
+        Falls back to the tailnet address (still reachable remotely) and then
+        to loopback, exactly as the launcher does.
+        """
+        try:
+            out = subprocess.run(["hostname", "-I"], capture_output=True,
+                                 text=True, timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""
+        addrs = out.split()
+        for addr in addrs:
+            if addr == "::1" or addr.startswith(("127.", "100.")):
+                continue
+            return addr
+        for addr in addrs:
+            if addr.startswith("100."):
+                return addr
+        return "127.0.0.1"
+
+    # `or` rather than a two-argument getenv so an empty HOST="" also falls
+    # through to detection, matching ${HOST:-} in the launcher.
+    uvicorn.run(app, host=os.getenv("HOST") or own_address(),
+                port=int(os.getenv("PORT", "8002")))
