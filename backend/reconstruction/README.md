@@ -75,10 +75,11 @@ projects/<id>/
 ## CPU-only policy
 
 `enforce_cpu_only()` clears `CUDA_VISIBLE_DEVICES`, disables OpenCV's OpenCL
-runtime and clamps threads (`RECON_THREADS`, default 2, **max 4**). Every
+runtime and sizes threads to the machine it is running on (`RECON_THREADS`
+overrides; default is every logical core, with no fixed ceiling). Every
 stage logs `CPU-ONLY MODE ENABLED` and the actual algorithm list. Requesting a
 CUDA algorithm fails loudly with the CPU alternative named — there is no silent
-GPU fallback on this host (i5 M560, 6 GB RAM, no NVIDIA).
+GPU fallback, on any host.
 
 Heavy stages run one at a time (the default concurrency gate is 1); frames and
 videos are streamed to disk, never held in RAM.

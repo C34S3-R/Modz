@@ -142,12 +142,40 @@ def require_cpu_algorithm(name: str, available: bool, alternative: str) -> None:
 
 
 def cpu_threads() -> int:
-    # Default 2 (2 physical cores); 4 is the documented optional maximum
-    # (4 logical threads).  Higher values only cause cache thrash here.
+    """Logical threads to use, sized to the machine this is running on.
+
+    A fixed number cannot suit a tool meant to run anywhere.  The old default
+    of 2 under a hard cap of 4 handed a 16-core desktop two threads, and this
+    is the value OpenCV sizes its matcher to - so the cap landed squarely on
+    the most expensive stage in the pipeline.  RECON_THREADS still wins when
+    set to a positive number; otherwise detect the machine, which is the only
+    figure that is right on both a 2-core laptop and a 32-core workstation.
+    """
     try:
-        return max(1, min(4, int(os.getenv("RECON_THREADS", "2"))))
+        requested = int(os.getenv("RECON_THREADS", ""))
     except (TypeError, ValueError):
-        return 2
+        requested = 0
+    if requested > 0:
+        return requested
+    return max(1, os.cpu_count() or 2)
+
+
+def detect_ram_limit_gb() -> float:
+    """How much RAM the engine may hold, sized to this machine.
+
+    The dense stage batches its TSDF against this budget, so too small a
+    value costs extra passes and too large one risks an OOM kill on a host
+    with no swap.  70% of physical reproduces the 4.0 GB this was tuned on (a
+    6 GB host) while leaving the OS its quarter, and the ceiling stops
+    mattering once the dense batch is already big enough that more buys no
+    fewer passes.
+    """
+    try:
+        physical = (os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+                    / (1024 ** 3))
+    except (ValueError, OSError, AttributeError, TypeError):
+        physical = 6.0
+    return round(max(2.0, min(16.0, physical * 0.70)), 1)
 
 
 def resolve_blender(configured: str) -> Optional[str]:
@@ -230,8 +258,8 @@ class ReconConfig:
 
     # --- hardware policy -------------------------------------------------
     cpu_only: bool = True
-    threads: int = 2                 # default 2; 4 allowed via --threads
-    ram_limit_gb: float = 4.0        # of 6 GB physical; reduce batch if above
+    threads: int = 2                 # for_project fills this from cpu_threads()
+    ram_limit_gb: float = 4.0        # for_project fills this from detect_ram_limit_gb()
     quality: str = "low"             # preset: low | medium | high
 
     # --- phase 1: video -> frames ----------------------------------------
@@ -479,8 +507,8 @@ class ReconConfig:
         cfg = cls(
             project_dir=project_dir,
             quality=preset_name,
-            threads=max(1, min(4, threads if threads is not None else cpu_threads())),
-            ram_limit_gb=_f("RECON_RAM_LIMIT_GB", 4.0),
+            threads=max(1, threads if threads is not None else cpu_threads()),
+            ram_limit_gb=_f("RECON_RAM_LIMIT_GB", detect_ram_limit_gb()),
             frame_interval=max(0.05, float(
                 frame_interval if frame_interval is not None
                 else _f("RECON_FRAME_INTERVAL", 0.3))),
