@@ -12,39 +12,20 @@ else
   PYTHON="python3"
 fi
 
-# Default to this machine's own address. Modz runs on whichever machine is
-# doing the processing, so it should advertise that machine - a routable
-# address on it, reachable by that host and anything else on its LAN. Not
-# loopback
-# (which locks every other device out), and not a synthesized overlay address
-# such as Tailscale's 100.x, which only tailnet peers can reach and which is
-# meaningless on somebody else's laptop.
+# Default to localhost (127.0.0.1): the tool runs on whichever machine needs
+# it and serves that machine only, so whoever starts it - you, or someone on
+# their own laptop - opens http://localhost:<port> locally and the pipeline
+# runs right there.  Network exposure is a deliberate, explicit opt-in (below),
+# never the default, which also keeps the unauthenticated admin/file APIs off
+# the network unless you ask for it.
 #
-#   HOST=<unset>    this machine's own non-loopback address (default)
-#   HOST=loopback   this machine only - 127.0.0.1
-#   HOST=auto       old behaviour: prefer Tailscale (100.*) when present
-#   HOST=0.0.0.0    every interface
+#   HOST=<unset>    localhost - this machine only (default)
+#   HOST=0.0.0.0    every interface (LAN + tailnet + ...)
 #   HOST=<ip>       one specific address
-own_address() {
-  local addr
-  for addr in $(hostname -I 2>/dev/null); do
-    case "$addr" in
-      127.*|::1|100.*) ;;
-      *) printf '%s' "$addr"; return 0 ;;
-    esac
-  done
-  # No LAN address (offline, or interface still coming up): take the tailnet
-  # address rather than nothing, so the machine is still reachable remotely.
-  for addr in $(hostname -I 2>/dev/null); do
-    case "$addr" in
-      100.*) printf '%s' "$addr"; return 0 ;;
-    esac
-  done
-  printf '127.0.0.1'
-}
-
+#   HOST=auto       prefer Tailscale (100.*) when present, else the LAN address
+#   HOST=loopback   this machine only - 127.0.0.1 (same as the default)
 case "${HOST:-}" in
-  "") HOST="$(own_address)" ;;
+  "") HOST="127.0.0.1" ;;
   loopback) HOST="127.0.0.1" ;;
   auto)
     HOST=""
