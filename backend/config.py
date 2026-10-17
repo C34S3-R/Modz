@@ -8,10 +8,21 @@ checkout can be started without a separate configuration file.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
+
+# Origins that always belong to the machine running the browser: loopback
+# addresses on any port, plus the opaque origins file:// pages send.  The UI may
+# be opened from disk or from a static preview server sitting beside the
+# backend, and it then has to reach the API across origins.  Anything outside
+# this pattern stays an explicit CORS_ORIGINS opt-in.
+LOCAL_ORIGIN_PATTERN = (
+    r"^(https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?|file://|null)$"
+)
+LOCAL_ORIGIN_RE = re.compile(LOCAL_ORIGIN_PATTERN)
 
 
 def _path_from_env(root: Path, value: str) -> Path:
@@ -82,19 +93,23 @@ class AppConfig:
         database = _path_from_env(root, os.getenv("DATABASE_PATH", "server.db"))
         temp = _path_from_env(root, os.getenv("TEMP_DIRECTORY", str(processing / "_tmp")))
 
-        origins = tuple(
-            origin.strip()
-            for origin in os.getenv(
-                "CORS_ORIGINS",
-                "http://localhost:8000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080",
-            ).split(",")
-            if origin.strip()
-        ) or (
-            "http://localhost:8000",
-            "http://127.0.0.1:8000",
-            "http://localhost:8080",
-            "http://127.0.0.1:8080",
+        raw_origins = os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:8000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080",
         )
+        # A single "*" means "any origin" and is passed through to Starlette
+        # verbatim; a comma-separated list is still honoured entry by entry.
+        if raw_origins.strip() == "*":
+            origins: tuple[str, ...] = ("*",)
+        else:
+            origins = tuple(
+                origin.strip() for origin in raw_origins.split(",") if origin.strip()
+            ) or (
+                "http://localhost:8000",
+                "http://127.0.0.1:8000",
+                "http://localhost:8080",
+                "http://127.0.0.1:8080",
+            )
 
         return cls(
             base_dir=root,
@@ -154,6 +169,22 @@ class AppConfig:
             self.database_path.parent,
         ):
             directory.mkdir(parents=True, exist_ok=True)
+
+    def origin_allowed(self, origin: str) -> bool:
+        """Is this browser Origin allowed to open a live/API connection?
+
+        Configured CORS_ORIGINS entries always count, "*" allows everything, and
+        the browser's own machine (loopback / file://) is allowed implicitly so
+        the UI works when it is opened from disk or from a static preview next
+        to the backend.  Used by the WebSocket handshake; CORS uses the same
+        rules through LOCAL_ORIGIN_PATTERN.
+        """
+
+        if not origin or "*" in self.cors_origins:
+            return True
+        if origin in self.cors_origins:
+            return True
+        return LOCAL_ORIGIN_RE.fullmatch(origin) is not None
 
     def resolve_tool(self, configured: Optional[str]) -> Optional[str]:
         """Resolve a configured executable without invoking a shell."""

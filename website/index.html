@@ -56,7 +56,7 @@
       <header id="topbar">
         <h1 id="page-title">Dashboard</h1>
         <div id="topbar-right">
-          <div id="backend-badge" class="badge badge-warn">Backend: offline</div>
+          <div id="backend-badge" class="badge badge-warn">Backend: checking&hellip;</div>
           <button id="theme-btn" class="icon-btn" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9680;</button>
         </div>
       </header>
@@ -126,6 +126,20 @@
 
   <div id="toasts"></div>
 
-  <script type="module" src="script.js?v=9"></script>
+  <!-- Chrome and Firefox refuse to fetch ES modules from a file:// document, so
+       opening index.html straight from disk would run no script at all and the
+       badge would sit on its initial text forever. script.js uses no import or
+       export statements, so on disk it is loaded as a classic script instead;
+       over http(s) the module tag below runs it and this branch never fires. -->
+  <script>
+    if (location.protocol === "file:") {
+      window.addEventListener("DOMContentLoaded", () => {
+        const s = document.createElement("script");
+        s.src = "script.js?v=10";
+        document.body.appendChild(s);
+      });
+    }
+  </script>
+  <script type="module" src="script.js?v=10"></script>
 </body>
 </html>

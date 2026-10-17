@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,9 +15,18 @@ from config import AppConfig
 
 
 class SystemMonitor:
+    # A status read spawns `ps`, walks /proc and samples CPU twice.  Several
+    # browsers (one per device) polling every few seconds do not each need a
+    # fresh sample, and under a running pipeline the subprocess is the slowest
+    # part of the request.  Cache briefly so the endpoint stays cheap.
+    STATUS_TTL = 2.0
+
     def __init__(self, config: AppConfig):
         self.config = config
         self.started_at = time.time()
+        self._cache: Optional[Dict[str, Any]] = None
+        self._cache_at = 0.0
+        self._cache_lock = threading.Lock()
 
     def _cpu_percent(self) -> float:
         try:
@@ -92,11 +103,20 @@ class SystemMonitor:
     def status(self, dependencies: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         # These values are advisory diagnostics.  They are intentionally kept
         # independent of optional third-party monitoring libraries.
+        now = time.monotonic()
+        with self._cache_lock:
+            if self._cache is not None and now - self._cache_at < self.STATUS_TTL:
+                return dict(self._cache)
         cpu = self._cpu_percent()
         ram_used, ram_total = self._memory()
         disk = shutil.disk_usage(self.config.base_dir)
+        try:
+            hostname = socket.gethostname()
+        except OSError:  # pragma: no cover - hostname is cosmetic only
+            hostname = ""
         result: Dict[str, Any] = {
             "online": True,
+            "hostname": hostname,
             "cpu_percent": cpu,
             "cpu": cpu,
             "ram_used_gb": ram_used,
@@ -113,4 +133,7 @@ class SystemMonitor:
             "dependencies": dependencies or self.config.tool_status(),
             "max_concurrent_jobs": self.config.max_concurrent_jobs,
         }
-        return result
+        with self._cache_lock:
+            self._cache = result
+            self._cache_at = time.monotonic()
+        return dict(result)

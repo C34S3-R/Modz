@@ -39,6 +39,7 @@ from api.search import router as search_router
 from api.system import router as system_router
 from ai_advisor import AIAdvisor
 from config import AppConfig
+from config import LOCAL_ORIGIN_PATTERN
 from database import Database
 from export_service import ExportService
 from file_manager import FileManager
@@ -140,7 +141,13 @@ def _provided_token(request: Request) -> str | None:
     authorization = request.headers.get("authorization", "")
     if authorization.lower().startswith("bearer "):
         return authorization[7:].strip()
-    return request.headers.get("x-api-token")
+    token = request.headers.get("x-api-token")
+    if token:
+        return token
+    # EventSource (the live-update fallback) cannot set request headers, so a
+    # query parameter is the only way a browser can authenticate that stream.
+    # Headers win whenever both are present.
+    return request.query_params.get("token")
 
 
 @app.middleware("http")
@@ -152,6 +159,9 @@ async def optional_api_token(request: Request, call_next):
         token
         and request.method != "OPTIONS"
         and (request.url.path.startswith("/api/") or request.url.path == "/api")
+        # /api/health answers "is a Modz server reachable here?" and carries no
+        # data, so the UI can probe for a backend before it knows any token.
+        and request.url.path != "/api/health"
     ):
         provided = _provided_token(request)
         if not provided or not hmac.compare_digest(provided, token):
@@ -162,6 +172,10 @@ async def optional_api_token(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(services.config.cors_origins),
+    # Loopback and file:// origins are served implicitly (see config.LOCAL_ORIGIN_RE)
+    # so the UI can be opened from disk or from a static preview on the same
+    # machine.  Everything else still has to be listed in CORS_ORIGINS.
+    allow_origin_regex=LOCAL_ORIGIN_PATTERN,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -183,7 +197,17 @@ app.include_router(ws_router)
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "vehicle-processing"}
+    # Liveness probe used by the browser to find a reachable backend.  It is
+    # deliberately free of machine details and open to any origin: the frontend
+    # has to be able to ask "is a Modz server running here?" before it knows
+    # where the API lives or which token (if any) to send.
+    return JSONResponse(
+        {"status": "ok", "service": "vehicle-processing"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # Keep the website and API on one origin.  This must remain the final route.

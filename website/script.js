@@ -3,15 +3,111 @@
 // backend. This file talks to the REST API and renders state.
 
 // ---------------------------------------------------------------------------
-// API layer
+// Backend location
 // ---------------------------------------------------------------------------
+//
+// Processing only ever runs inside a Modz backend, never in this page, so the
+// first job of the UI is to find the right backend.  Candidates are tried in
+// this order:
+//
+//   1. ?api= (or a backend saved in Settings)      an explicit choice
+//   2. the page's own origin, when it is loopback   the normal case: the
+//      backend serves this UI itself
+//   3. a Modz backend on this machine               127.0.0.1 / localhost on
+//      port 8002 (and the page's own port), so a copy of the UI opened from
+//      disk or from a static preview still drives the backend running on
+//      *this* device
+//   4. the page's own origin                        a backend on another machine
+//
+// A winner on a different origin is navigated to instead of called
+// cross-origin, which keeps REST, uploads, downloads and the live channel
+// same-origin.  Rule 3 before rule 4 is what keeps processing on the device
+// the browser is on; rule 4 is only used - and only after an explicit "use
+// that server" - when this device has no backend of its own.
 
-const API_BASE = "/api";
+const BACKEND_KEY = "modz-api-base";  // explicit backend URL (?api= / Settings)
+const TOKEN_KEY = "modz-api-token";   // API token (?token= / Settings)
+const REMOTE_KEY = "modz-remote-ok";  // origin the user agreed to use remotely
+
+let API_BASE = "/api";
+let API_TOKEN = "";
+
+// ?token= and ?api= let a link hand this browser a session (the token cannot be
+// sent by hand on the live channel otherwise).  Both are remembered so the
+// session survives the URL being cleared or bookmarked without them.
+(function rememberUrlSession() {
+  let token = "";
+  let backend = "";
+  try {
+    const params = new URLSearchParams(location.search);
+    token = String(params.get("token") || "").trim();
+    backend = normalizeBase(params.get("api"));
+  } catch (_) { /* no search string */ }
+  if (token) storageSet(TOKEN_KEY, token);
+  if (backend) storageSet(BACKEND_KEY, backend);
+  API_TOKEN = token || storageGet(TOKEN_KEY);
+})();
+
+function storageGet(key) {
+  try { return localStorage.getItem(key) || ""; } catch (_) { return ""; }
+}
+function storageSet(key, value) {
+  try { value ? localStorage.setItem(key, value) : localStorage.removeItem(key); }
+  catch (_) { /* private mode */ }
+}
+
+// Accept "host:port", "http://host:port" or a full URL and return a base
+// without a trailing slash, so it can be used as `${base}/api`.
+function normalizeBase(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `http://${value}`;
+  try {
+    const url = new URL(withScheme);
+    const path = url.pathname.replace(/\/+$/, "");
+    return `${url.origin}${path}`;
+  } catch (_) { return ""; }
+}
+
+function authHeaders(headers) {
+  if (!API_TOKEN) return headers || {};
+  return { ...(headers || {}), "X-API-Token": API_TOKEN };
+}
+
+// Browser navigations (file downloads, EventSource) cannot set headers, so the
+// token travels as a query parameter there.
+function authQuery(url) {
+  if (!API_TOKEN) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(API_TOKEN)}`;
+}
+
+function apiOrigin() {
+  try { return new URL(API_BASE, location.href).origin; } catch (_) { return location.origin; }
+}
+
+function isAuthError(err) {
+  return /\b401\b|API token/i.test(String(err && err.message));
+}
+
+// A busy pipeline can make /api/status slow; the UI must never hang on a
+// request it uses as a liveness check, or one slow reply reads as "offline".
+function withTimeout(work, ms, what = "request") {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${Math.round(ms / 1000)}s`)), ms);
+  });
+  const guarded = Promise.resolve(work);
+  guarded.catch(() => { /* the race below owns the outcome */ });
+  return Promise.race([guarded, timeout]).finally(() => clearTimeout(timer));
+}
 
 async function api(path, options = {}) {
+  const fallbackHeaders = options.body instanceof FormData
+    ? undefined
+    : { "Content-Type": "application/json" };
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: options.body instanceof FormData ? undefined : { "Content-Type": "application/json" },
     ...options,
+    headers: authHeaders(options.headers ?? fallbackHeaders),
   });
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
@@ -19,6 +115,7 @@ async function api(path, options = {}) {
       const data = await res.json();
       if (data && data.detail) detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
     } catch { /* ignore body parse errors */ }
+    if (res.status === 401 && !detail.includes("401")) detail = `401 ${detail}`;
     throw new Error(detail);
   }
   if (res.status === 204) return null;
@@ -38,6 +135,7 @@ function apiUpload(path, fd, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_BASE}${path}`);
+    if (API_TOKEN) xhr.setRequestHeader("X-API-Token", API_TOKEN);
     xhr.onload = () => {
       let data = null;
       try { data = JSON.parse(xhr.responseText); } catch { /* non-JSON body */ }
@@ -92,7 +190,7 @@ const API_ENDPOINTS = {
   sourceCheck: (id) => api(`/projects/${id}/source-check`),
   advisor: (id) => api(`/projects/${id}/advisor`),
   deleteFile: (id, path) => api(`/projects/${id}/files?path=${encodeURIComponent(path)}`, { method: "DELETE" }),
-  downloadFile: (id, path) => `${API_BASE}/projects/${id}/files/download?path=${encodeURIComponent(path)}`,
+  downloadFile: (id, path) => authQuery(`${API_BASE}/projects/${id}/files/download?path=${encodeURIComponent(path)}`),
   modelInfo: (id) => api(`/projects/${id}/model`),
   lights: (id) => api(`/projects/${id}/lights`),
   updateLight: (id, light) => api(`/projects/${id}/lights`, { method: "PUT", body: JSON.stringify(light) }),
@@ -105,26 +203,34 @@ const API_ENDPOINTS = {
   settings: () => api("/settings"),
   saveSettings: (data) => api("/settings", { method: "PUT", body: JSON.stringify(data) }),
   clearLogs: () => api("/logs", { method: "DELETE" }),
-  downloadLogs: () => `${API_BASE}/logs/download`,
+  downloadLogs: () => authQuery(`${API_BASE}/logs/download`),
 };
 
 // Alias used across all views: API.listProjects(), API.createProject(), ...
 const API = API_ENDPOINTS;
 
 // Real-time updates: WebSocket when available, SSE fallback, polling last.
+// The channel always runs against the resolved backend origin and carries the
+// API token, because a live channel that cannot authenticate looks exactly like
+// a dead backend.
 const Live = {
   ws: null,
   es: null,
   listeners: new Set(),
+  connected: false,
+  lastOk: Date.now(),
   connect() {
     if (this.ws || this.es) return;
     try {
-      const proto = location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${proto}://${location.host}/ws`);
-      ws.onmessage = (ev) => this.receive(ev.data);
+      const origin = new URL(apiOrigin());
+      const proto = origin.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(authQuery(`${proto}://${origin.host}/ws`));
+      ws.onopen = () => { this.markConnected(); };
+      ws.onmessage = (ev) => { this.markConnected(); this.receive(ev.data); };
       ws.onerror = () => ws.close();
       ws.onclose = () => {
         if (this.ws === ws) this.ws = null;
+        this.connected = false;
         this.connectSSE();
       };
       this.ws = ws;
@@ -135,17 +241,23 @@ const Live = {
   connectSSE() {
     if (this.es || this.ws) return;
     try {
-      const es = new EventSource(`${API_BASE}/events`);
-      es.onmessage = (ev) => this.receive(ev.data);
+      const es = new EventSource(authQuery(`${API_BASE}/events`));
+      es.onopen = () => this.markConnected();
+      es.onmessage = (ev) => { this.markConnected(); this.receive(ev.data); };
       es.onerror = () => {
         es.close();
         if (this.es === es) this.es = null;
+        this.connected = false;
         setTimeout(() => this.connect(), 3000);
       };
       this.es = es;
     } catch {
       setTimeout(() => this.connect(), 3000);
     }
+  },
+  markConnected() {
+    this.connected = true;
+    this.lastOk = Date.now();
   },
   receive(raw) {
     try {
@@ -169,6 +281,11 @@ const state = {
   settings: {},
   server: null,
   route: "dashboard",
+  // Backend resolution (see the header of this file).
+  backendOrigin: location.origin,  // origin the API calls go to
+  backendRemote: false,            // true when that origin is another machine
+  backendReady: false,             // data + live channel started
+  backendGate: null,               // set while waiting for a remote-use opt-in
 };
 
 // ---------------------------------------------------------------------------
@@ -467,12 +584,13 @@ views.dashboard = function renderDashboard() {
 
   const stats = el("div", { class: "grid grid-3 mt" });
   const metrics = [
-    ["CPU", s ? `${Math.round(s.cpu_percent ?? 0)}%` : "--", s ? (s.cpu_percent ?? 0) / 100 : null],
-    ["RAM", s ? `${(s.ram_used_gb ?? 0).toFixed(1)} / ${(s.ram_total_gb ?? 0).toFixed(1)} GB` : "--",
+    ["CPU", s && s.cpu_percent != null ? `${Math.round(s.cpu_percent)}%` : "--",
+      s && s.cpu_percent != null ? s.cpu_percent / 100 : null],
+    ["RAM", s && s.ram_total_gb ? `${(s.ram_used_gb ?? 0).toFixed(1)} / ${(s.ram_total_gb ?? 0).toFixed(1)} GB` : "--",
       s && s.ram_total_gb ? s.ram_used_gb / s.ram_total_gb : null],
-    ["Storage", s ? `${(s.disk_used_gb ?? 0).toFixed(0)} / ${(s.disk_total_gb ?? 0).toFixed(0)} GB` : "--",
+    ["Storage", s && s.disk_total_gb ? `${(s.disk_used_gb ?? 0).toFixed(0)} / ${(s.disk_total_gb ?? 0).toFixed(0)} GB` : "--",
       s && s.disk_total_gb ? s.disk_used_gb / s.disk_total_gb : null],
-    ["Uptime", s ? elapsed(s.uptime_seconds) : "--", null],
+    ["Uptime", s && s.uptime_seconds != null ? elapsed(s.uptime_seconds) : "--", null],
   ];
   for (const [label, value, ratio] of metrics) {
     stats.append(el("div", { class: "card metric-card" },
@@ -1554,7 +1672,7 @@ async function pollExport(projectId) {
       doneCard.style.display = "";
       document.getElementById("export-file").textContent = st.filename || "export.zip";
       const a = document.getElementById("export-download");
-      a.href = st.download_url || API.downloadFile(projectId, st.filename || "export.zip");
+      a.href = authQuery(st.download_url || API.downloadFile(projectId, st.filename || "export.zip"));
       a.textContent = `Download ${st.filename || "export.zip"}`;
     } else if (st.status === "failed") {
       clearInterval(timer);
@@ -1615,6 +1733,45 @@ views.settings = function renderSettings() {
     el("p", { class: "muted" }, "Single-user server. Keep concurrent jobs at 1 to avoid overloading the machine."),
     form,
   ));
+
+  // Connection: which backend this page talks to.  Processing always happens in
+  // a backend, so this is what decides *where* jobs run.
+  const connForm = el("form", { id: "connection-form" },
+    el("label", {}, "Backend URL",
+      el("input", {
+        type: "text",
+        name: "backend",
+        value: storageGet(BACKEND_KEY),
+        placeholder: state.backendOrigin,
+        autocomplete: "off",
+      })),
+    el("label", {}, "API token",
+      el("input", { type: "password", name: "token", value: API_TOKEN, autocomplete: "off" })),
+    el("div", { class: "row mt" },
+      el("button", { type: "submit", class: "btn btn-primary" }, "Save Connection")),
+  );
+  connForm.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(connForm);
+    const token = String(fd.get("token") || "").trim();
+    const base = normalizeBase(fd.get("backend"));
+    storageSet(BACKEND_KEY, base);
+    storageSet(TOKEN_KEY, token);
+    API_TOKEN = token;
+    // A URL typed here is a deliberate choice of where processing runs, so it
+    // replaces any earlier "use that other server" consent.
+    if (base) storageSet(REMOTE_KEY, "");
+    toast("Connection saved - reloading", "ok");
+    setTimeout(() => window.location.reload(), 350);
+  });
+  v.append(el("div", { class: "card mt" },
+    el("div", { class: "panel-label" }, "Connection"),
+    el("p", { class: "muted" },
+      "Where this page sends its API calls, so you choose which machine does the work. "
+      + "Leave the URL empty to use a backend on this device first (127.0.0.1 / localhost:8002), "
+      + "then the server that served this page. The token is only needed when the backend sets API_TOKEN."),
+    connForm,
+  ));
   return v;
 };
 
@@ -1643,6 +1800,11 @@ function parseHash() {
 }
 
 async function renderRoute() {
+  // While the backend choice is unresolved the gate owns the page; a hash
+  // change or a stray live event must not render a UI with no server behind it.
+  // Settings stays reachable - it is how a backend URL or token gets set.
+  if (state.backendGate && parseHash().name !== "settings") { renderGate(); return; }
+
   const { name, arg, params } = parseHash();
   state.route = name;
 
@@ -1700,6 +1862,163 @@ async function refreshProject(id, rerender = true) {
 }
 
 // ---------------------------------------------------------------------------
+// Backend discovery
+// ---------------------------------------------------------------------------
+
+// Loopback is the only address that proves a backend is running on the machine
+// the browser is on, which is where processing has to happen.
+function isLoopbackHost(hostname) {
+  const host = String(hostname || "").toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]"
+    || host === "::1" || host.endsWith(".localhost");
+}
+
+function isLoopbackBase(base) {
+  try { return isLoopbackHost(new URL(base).hostname); } catch (_) { return false; }
+}
+
+// Ask a candidate backend whether it is really Modz.  /api/health is exempt
+// from the API token and sends `Access-Control-Allow-Origin: *` on purpose, so
+// this works across origins (disk, static preview, another port) without
+// forcing a preflight.  No auth header: a custom header would turn this into a
+// cross-origin preflight and hide a perfectly reachable backend.
+async function probeBackend(base, timeoutMs = 2500) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${base}/api/health`, { signal: controller.signal, cache: "no-store" });
+    if (!res.ok) return false;
+    return (await res.text()).includes("vehicle-processing");
+  } catch (_) {
+    return false;  // nothing listening, blocked, or not a Modz server
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Only ?token= and ?api= survive the move to another origin; they are what the
+// new page needs to keep the same session.
+function carriedQuery() {
+  const current = new URLSearchParams(location.search);
+  const carried = new URLSearchParams();
+  for (const key of ["api", "token"]) {
+    const value = current.get(key);
+    if (value) carried.set(key, value);
+  }
+  const text = carried.toString();
+  return text ? `?${text}` : "";
+}
+
+// Commit to a backend that just answered the probe.
+function adoptBackend(candidate) {
+  const base = candidate.base;
+  let origin;
+  try { origin = new URL(base, location.href).origin; } catch (_) { return "none"; }
+  const remote = !isLoopbackBase(base);
+
+  if (remote && candidate.kind !== "explicit" && storageGet(REMOTE_KEY) !== origin) {
+    // Using it would run every job on another machine.  Ask first, once.
+    state.backendGate = { origin };
+    return "gate";
+  }
+
+  state.backendGate = null;
+  state.backendRemote = remote;
+
+  if (origin === location.origin) {
+    // Same origin: the server already serves this UI, keep relative URLs.
+    API_BASE = "/api";
+    state.backendOrigin = location.origin;
+    return "ready";
+  }
+
+  // Move the page onto that backend instead of calling it cross-origin, so
+  // REST, uploads, downloads and the live channel all stay same-origin.
+  const target = new URL(base);
+  target.pathname = `${target.pathname.replace(/\/+$/, "")}/`;
+  target.search = carriedQuery();
+  target.hash = location.hash;
+  location.replace(target.href);
+  return "navigating";
+}
+
+// Walk the candidate list in the order documented at the top of this file.
+async function resolveBackend() {
+  const pageHttp = /^https?:$/.test(location.protocol);
+  const pageLoopback = pageHttp && isLoopbackHost(location.hostname);
+
+  const fromUrl = normalizeBase(new URLSearchParams(location.search).get("api"));
+  if (fromUrl) storageSet(BACKEND_KEY, fromUrl);
+  const explicit = fromUrl || normalizeBase(storageGet(BACKEND_KEY));
+
+  const seen = new Set();
+  const candidates = [];
+  const push = (base, kind) => {
+    if (!base || seen.has(base)) return;
+    seen.add(base);
+    candidates.push({ base, kind });
+  };
+
+  if (explicit) push(explicit, isLoopbackBase(explicit) ? "local" : "explicit");
+  if (pageLoopback) push(location.origin, "local");
+
+  const ports = new Set(["8002"]);
+  if (pageHttp && location.port && !["80", "443"].includes(location.port)) ports.add(location.port);
+  for (const port of ports) {
+    push(`http://127.0.0.1:${port}`, "local");
+    push(`http://localhost:${port}`, "local");
+  }
+  if (pageHttp && !pageLoopback) push(location.origin, "origin");
+
+  for (const candidate of candidates) {
+    if (await probeBackend(candidate.base)) return adoptBackend(candidate);
+  }
+  return "none";
+}
+
+// Full-screen fallback while the remote opt-in is pending.
+function renderGate() {
+  const gate = state.backendGate;
+  if (!gate) return false;
+  const badge = document.getElementById("backend-badge");
+  badge.textContent = "Backend: not connected";
+  badge.className = "badge badge-warn";
+  badge.title = `A server is available at ${gate.origin}`;
+  document.getElementById("server-dot").className = "dot dot-off";
+  document.getElementById("server-online-label").textContent = "OFFLINE";
+
+  const view = document.getElementById("view");
+  view.replaceChildren(el("div", { class: "card" },
+    el("h2", {}, "Choose where processing runs"),
+    el("p", { class: "muted" },
+      `A Modz server answers at ${gate.origin}, but it is not running on this device, so every job would run there instead of here.`),
+    el("p", { class: "muted" },
+      "To process on this device, start Modz here (./start-matatu) - this page picks up a local backend on its own."),
+    el("div", { class: "row mt" },
+      el("button", { class: "btn btn-primary", onclick: acceptRemoteServer }, `Use ${gate.origin} anyway`),
+      el("button", { class: "btn", onclick: () => window.location.reload() }, "Look for a local backend"),
+    ),
+    el("p", { class: "muted mt" },
+      "The choice is remembered for this browser; change it under Settings \u2192 Connection."),
+  ));
+  document.getElementById("page-title").textContent = "Backend";
+  document.getElementById("sidebar").classList.remove("open");
+  return true;
+}
+
+async function acceptRemoteServer() {
+  if (!state.backendGate) return;
+  storageSet(REMOTE_KEY, state.backendGate.origin);
+  const outcome = await resolveBackend();
+  if (outcome === "ready") {
+    if (state.backendRetry) { clearInterval(state.backendRetry); state.backendRetry = null; }
+    await startBackend();
+  } else if (outcome !== "navigating") {
+    renderGate();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Data loading + live updates
 // ---------------------------------------------------------------------------
 
@@ -1713,24 +2032,122 @@ async function loadSettings() {
   catch { state.settings = {}; }
 }
 
+let serverWasOnline = null;   // null until the first probe settles
+let authNoticeShown = false;  // one "needs a token" toast per unlock, not per poll
+
+function setBackendBadge(text, kind, title) {
+  const badge = document.getElementById("backend-badge");
+  badge.textContent = text;
+  badge.className = `badge ${kind}`;
+  badge.title = title || "";
+}
+
+function paintMetrics(s) {
+  document.getElementById("sb-cpu").textContent =
+    s && s.cpu_percent != null ? `${Math.round(s.cpu_percent)}%` : "--";
+  document.getElementById("sb-ram").textContent = s && s.ram_total_gb
+    ? `${(s.ram_used_gb ?? 0).toFixed(1)} / ${(s.ram_total_gb ?? 0).toFixed(1)} GB` : "--";
+  document.getElementById("sb-disk").textContent = s && s.disk_total_gb
+    ? `${(s.disk_used_gb ?? 0).toFixed(0)} / ${(s.disk_total_gb ?? 0).toFixed(0)} GB` : "--";
+}
+
+// Liveness and metrics are two different questions.  /api/health is a constant
+// and answers even while the pipeline is saturating the machine; /api/status
+// samples processes and can be slow or refused.  A failure of the second must
+// never paint a reachable backend "offline", and every failure path has to
+// redraw the badge - an unhandled error here used to leave the initial
+// "Backend: offline" text on screen forever.
 async function loadServerStatus() {
+  const dot = document.getElementById("server-dot");
+  const label = document.getElementById("server-online-label");
+
+  let online = false;
+  let locked = false;
+  let reason = "";
   try {
-    state.server = await API.serverStatus();
-    const online = !!state.server?.online;
-    document.getElementById("server-dot").className = `dot ${online ? "dot-on" : "dot-off"}`;
-    document.getElementById("server-online-label").textContent = online ? "ONLINE" : "OFFLINE";
-    document.getElementById("sb-cpu").textContent = `${Math.round(state.server?.cpu_percent ?? 0)}%`;
-    document.getElementById("sb-ram").textContent = state.server
-      ? `${(state.server.ram_used_gb ?? 0).toFixed(1)} / ${(state.server.ram_total_gb ?? 0).toFixed(1)} GB` : "--";
-    document.getElementById("sb-disk").textContent = state.server
-      ? `${(state.server.disk_used_gb ?? 0).toFixed(0)} / ${(state.server.disk_total_gb ?? 0).toFixed(0)} GB` : "--";
-    const badge = document.getElementById("backend-badge");
-    badge.textContent = online ? "Backend: online" : "Backend: offline";
-    badge.className = `badge ${online ? "badge-ok" : "badge-warn"}`;
-  } catch {
-    document.getElementById("server-dot").className = "dot dot-off";
-    document.getElementById("server-online-label").textContent = "OFFLINE";
+    await withTimeout(api("/health"), 3000, "health check");
+    online = true;
+  } catch (err) {
+    locked = isAuthError(err);
+    reason = String(err && err.message);
   }
+
+  if (online) {
+    try {
+      state.server = await withTimeout(api("/status"), 6000, "status");
+      authNoticeShown = false;
+    } catch (err) {
+      if (isAuthError(err)) {
+        locked = true;
+        if (!authNoticeShown) {
+          authNoticeShown = true;
+          toast("Backend is locked: add the API token under Settings \u2192 Connection", "err");
+        }
+      }
+      reason = String(err && err.message);
+      // Keep the last good metrics while only the sample failed; if there are
+      // none yet, still show the backend as online - health already proved it.
+      if (!state.server) state.server = { online: true };
+    }
+  } else {
+    state.server = null;
+  }
+
+  const remoteHost = state.backendRemote ? (state.server?.hostname || "another device") : "";
+
+  if (online && !locked) {
+    dot.className = "dot dot-on";
+    label.textContent = "ONLINE";
+    setBackendBadge(
+      remoteHost ? `Backend: online \u00b7 runs on ${remoteHost}` : "Backend: online",
+      remoteHost ? "badge-warn" : "badge-ok",
+      remoteHost
+        ? `Processing runs on ${remoteHost} (${state.backendOrigin}), not this device. Start Modz on this device to process locally.`
+        : state.backendOrigin,
+    );
+    paintMetrics(state.server);
+  } else if (locked) {
+    dot.className = "dot dot-off";
+    label.textContent = "LOCKED";
+    setBackendBadge("Backend: locked", "badge-warn",
+      "The server answered but refused the request - set the API token under Settings \u2192 Connection");
+    paintMetrics(null);
+  } else {
+    dot.className = "dot dot-off";
+    label.textContent = "OFFLINE";
+    setBackendBadge("Backend: offline", "badge-warn",
+      reason ? `No answer from ${state.backendOrigin}: ${reason}` : `No answer from ${state.backendOrigin}`);
+    paintMetrics(null);
+  }
+
+  const nowOnline = online && !locked;
+  const wasOnline = serverWasOnline;
+  serverWasOnline = nowOnline;
+
+  if (wasOnline === false && nowOnline) await healAfterReconnect();
+
+  // Polling is the last resort in the live channel: when neither the WebSocket
+  // nor the SSE stream has delivered anything for a while, refresh directly so
+  // the UI never sits on stale state while a pipeline runs.
+  if (nowOnline && !Live.connected && Date.now() - Live.lastOk > 8000) await pollLiveFallback();
+}
+
+// The connection came back after an outage: reload whatever failed while the
+// backend was unreachable instead of leaving empty panels behind.
+async function healAfterReconnect() {
+  await Promise.all([loadProjects(), loadSettings()]);
+  if (state.currentProject) await refreshProject(state.currentProject.id, false);
+  renderRoute();
+  Live.connect();
+}
+
+async function pollLiveFallback() {
+  try {
+    const projects = await API.listProjects();
+    state.projects = projects || [];
+    if (state.currentProject) await refreshProject(state.currentProject.id, false);
+    if (["dashboard", "projects", "processing", "project", "logs"].includes(state.route)) scheduleRouteRender(300);
+  } catch { /* the status poll reports the outage */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -1814,7 +2231,51 @@ Live.on((msg) => {
   if (["project", "processing", "dashboard", "logs"].includes(state.route)) scheduleRouteRender();
 });
 
-Promise.all([loadProjects(), loadSettings()]).then(renderRoute);
-loadServerStatus();
-setInterval(loadServerStatus, 5000);
-Live.connect();
+// ---------------------------------------------------------------------------
+// Bootstrap: find the backend, then load data and open the live channel.
+// ---------------------------------------------------------------------------
+
+async function startBackend() {
+  if (state.backendReady) return;
+  state.backendReady = true;
+  if (state.backendRetry) { clearInterval(state.backendRetry); state.backendRetry = null; }
+  await Promise.all([loadProjects(), loadSettings()]);
+  renderRoute();
+  await loadServerStatus();
+  setInterval(loadServerStatus, 5000);
+  Live.connect();
+}
+
+// Keep looking while there is nothing to talk to.  Starting the backend a
+// moment after the page opened is the normal flow, so a local server should be
+// picked up on its own; and until one answers, "offline" has to stay the truth.
+function scheduleBackendRetry() {
+  if (state.backendRetry) return;
+  state.backendRetry = setInterval(async () => {
+    if (state.backendReady) { clearInterval(state.backendRetry); state.backendRetry = null; return; }
+    const outcome = await resolveBackend();
+    if (outcome === "navigating") return;
+    if (outcome === "ready") { await startBackend(); return; }
+    if (state.backendGate) renderGate();
+  }, 8000);
+}
+
+async function bootstrap() {
+  const outcome = await resolveBackend();
+  if (outcome === "navigating") return;   // a new page load continues from here
+  if (outcome === "ready") { await startBackend(); return; }
+  if (outcome === "gate") { renderGate(); scheduleBackendRetry(); return; }
+
+  // No backend on this device and none behind this page: say so plainly
+  // instead of leaving an unexplained "offline" badge on a dead dashboard.
+  renderRoute();
+  setBackendBadge("Backend: offline", "badge-warn", "No Modz backend answered on this device or this page");
+  toast("No Modz backend found. Start one on this device with ./start-matatu, or set a backend URL under Settings \u2192 Connection.", "err");
+  scheduleBackendRetry();
+}
+
+bootstrap().catch((err) => {
+  console.error("backend bootstrap failed", err);
+  renderRoute();
+  setBackendBadge("Backend: offline", "badge-warn", String(err && err.message || err));
+});

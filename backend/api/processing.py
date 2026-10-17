@@ -148,7 +148,7 @@ async def websocket_events(websocket: WebSocket):
     services = websocket.app.state.services
     token = services.config.api_token
     origin = websocket.headers.get("origin")
-    if origin and "*" not in services.config.cors_origins and origin not in services.config.cors_origins:
+    if origin and not services.config.origin_allowed(origin):
         # Same-origin handshakes are always allowed, whichever front door
         # the browser reached us on (loopback, LAN IP, tailnet, tunnel):
         # the Origin authority must match the request's own authority.
@@ -158,7 +158,10 @@ async def websocket_events(websocket: WebSocket):
             await websocket.close(code=1008, reason="Origin not allowed")
             return
     if token:
-        provided = websocket.headers.get("x-api-token") or websocket.query_params.get("token")
+        provided = (
+            websocket.headers.get("x-api-token")
+            or websocket.query_params.get("token")
+        )
         if not provided or not hmac.compare_digest(provided, token):
             await websocket.close(code=1008, reason="API token required")
             return
