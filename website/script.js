@@ -1993,7 +1993,7 @@ function renderGate() {
     el("p", { class: "muted" },
       `A Modz server answers at ${gate.origin}, but it is not running on this device, so every job would run there instead of here.`),
     el("p", { class: "muted" },
-      "To process on this device, start Modz here (./start-matatu) - this page picks up a local backend on its own."),
+      "To process on this device, start Modz here (./modz) - this page picks up a local backend on its own."),
     el("div", { class: "row mt" },
       el("button", { class: "btn btn-primary", onclick: acceptRemoteServer }, `Use ${gate.origin} anyway`),
       el("button", { class: "btn", onclick: () => window.location.reload() }, "Look for a local backend"),
@@ -2270,7 +2270,7 @@ async function bootstrap() {
   // instead of leaving an unexplained "offline" badge on a dead dashboard.
   renderRoute();
   setBackendBadge("Backend: offline", "badge-warn", "No Modz backend answered on this device or this page");
-  toast("No Modz backend found. Start one on this device with ./start-matatu, or set a backend URL under Settings \u2192 Connection.", "err");
+  toast("No Modz backend found. Start one on this device with ./modz, or set a backend URL under Settings \u2192 Connection.", "err");
   scheduleBackendRetry();
 }
 
