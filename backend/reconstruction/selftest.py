@@ -211,8 +211,20 @@ def render_view(verts, tris, tri_uv, textures, R, t, K, width, height,
              b2 * uv[2, 0] / zz[2]) / np.where(inv_z > 1e-9, inv_z, 1e-9)
         v = (b0 * uv[0, 1] / zz[0] + b1 * uv[1, 1] / zz[1] +
              b2 * uv[2, 1] / zz[2]) / np.where(inv_z > 1e-9, inv_z, 1e-9)
-        tex = textures[tri_index // 2]
+        # The box dataset carries one texture per quad (tris are emitted in
+        # pairs); an authored mesh - the headlight benchmark - supplies a
+        # single atlas plus per-triangle UVs instead, so honour whichever
+        # the caller brought.
+        tex = textures[0] if len(textures) == 1 else textures[tri_index // 2]
         size = tex.shape[0]
+        # u/v are interpolated across the whole bounding box, so pixels the
+        # barycentric test is about to throw away can send inv_z to ~0 and
+        # the ratio to inf.  Clamp instead of letting a non-finite value
+        # reach the int cast - those samples are discarded by `take` anyway.
+        u = np.clip(np.nan_to_num(u, nan=0.0, posinf=1.0, neginf=0.0),
+                    0.0, 1.0)
+        v = np.clip(np.nan_to_num(v, nan=0.0, posinf=1.0, neginf=0.0),
+                    0.0, 1.0)
         ix = np.clip((u * (size - 1)).astype(np.int32), 0, size - 1)
         iy = np.clip((v * (size - 1)).astype(np.int32), 0, size - 1)
         colour = tex[iy, ix]

@@ -1456,7 +1456,11 @@ const Viewer = {
         const matName = (child.material?.name || "").toLowerCase();
         const objName = (child.name || "").toLowerCase();
         const match = tokens.some((t) => matName.includes(t) || objName.includes(t));
-        if (child.isMesh && matName.includes("light")) {
+        // BUSSID names lamp materials in both English and Spanish - see
+        // light_manager's map (LightWhite, LuzRoja, LuzAnaranjada) - and a
+        // material the preview fails to recognise is one it never lights.
+        const isLamp = matName.includes("light") || matName.includes("luz");
+        if (child.isMesh && isLamp) {
           const on = match && name !== "ALL OFF";
           if (child.material.emissive) {
             child.material.emissiveIntensity = on ? 2.0 : 0.0;

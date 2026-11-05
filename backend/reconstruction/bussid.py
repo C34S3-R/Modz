@@ -100,6 +100,17 @@ def _resolve_sidecar(name: str, *dirs: Path) -> Path:
     )
 
 
+def _load_project_lights(project_dir: Path) -> List[Dict[str, Any]]:
+    """Lights the project has configured, via the shared, FastAPI-free helper.
+
+    Imported lazily so ``reconstruction`` stays importable without a
+    running server - the CLI drives the very same stage.
+    """
+    from lights_apply import load_lights
+
+    return load_lights(project_dir)
+
+
 def _prepare_dir(cfg: ReconConfig, model: Path, out_dir: Path
                  ) -> Tuple[List[str], Path]:
     """Copy model + referenced sidecars into ``bussid/``, write manifest.
@@ -119,6 +130,8 @@ def _prepare_dir(cfg: ReconConfig, model: Path, out_dir: Path
             details={"model": str(model)},
         )
 
+    lights = _load_project_lights(cfg.project_dir)
+
     texture_dir = cfg.d("texture")
     blender_dir = cfg.d("blender")
     names: List[str] = []
@@ -126,7 +139,6 @@ def _prepare_dir(cfg: ReconConfig, model: Path, out_dir: Path
     mtl_texts: Dict[str, str] = {}
 
     destination = out_dir / model.name
-    shutil.copy2(model, destination)
     names.append(model.name)
     seen.add(model.name)
 
@@ -153,6 +165,25 @@ def _prepare_dir(cfg: ReconConfig, model: Path, out_dir: Path
         if source.name not in mtl_texts:
             mtl_texts[source.name] = text
 
+    # Lights reach the phone here or not at all: assign each configured
+    # light's faces to its material and give that material a Ke, then list
+    # what actually claimed faces in the manifest.  The model is written as
+    # text rather than copied, so the delivered OBJ/MTL differ from the
+    # reconstruction by exactly this step.
+    applied: List[Dict[str, Any]] = []
+    obj_text = model.read_text(encoding="utf-8", errors="replace")
+    if lights and mtl_texts:
+        from lights_apply import add_light_materials, apply_lights
+
+        first = next(iter(mtl_texts))
+        obj_text, mtl_texts[first], applied = apply_lights(
+            obj_text, mtl_texts[first], lights)
+        for other in list(mtl_texts):
+            if other != first:
+                mtl_texts[other] = add_light_materials(mtl_texts[other], lights)
+
+    destination.write_text(obj_text, encoding="utf-8")
+
     for mtl_name, text in mtl_texts.items():
         if mtl_name in seen:
             continue
@@ -170,7 +201,7 @@ def _prepare_dir(cfg: ReconConfig, model: Path, out_dir: Path
         "format": "bussid",
         "model": model.name,
         "assets": names,
-        "lights": [],
+        "lights": applied,
     }
     manifest_path = out_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2),

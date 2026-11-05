@@ -142,7 +142,12 @@ def _stage_fingerprint(cfg: "ReconConfig", key: str,
 
     ``frame_extraction`` is deliberately excluded - the digest covers
     ``frames/selected``, which is its downstream output and does not exist
-    while it runs.
+    while it runs.  That leaves a known gap: extraction is keyed on settings
+    only, so replacing the input images without changing any setting (same
+    ``--views``, new renders) is invisible to it.  Closing it means digesting
+    ``input/`` as well, which would deliberately re-extract every completed
+    project once - a real cost for video inputs - so it is left alone until
+    that trade-off is worth making.
     """
     base = cfg.stage_fingerprint(key)
     if base is None or not frames_digest or key == "frame_extraction":
@@ -201,12 +206,25 @@ def run_pipeline(
     started = time.time()
     results: Dict[str, Any] = {}
     resumed: List[str] = []
-    frames_digest = _frames_digest(cfg)
 
     for key, _ in pipeline:
         if key not in handlers:
             continue
-        fingerprint = _stage_fingerprint(cfg, key, frames_digest)
+        # Re-read the digest here instead of taking one snapshot before the
+        # loop.  The frame stages run *inside* the loop, so a snapshot from
+        # the top describes the frames as they were before frame_extraction
+        # and frame_selection touched them - and it is the only input
+        # identity feature_fingerprint() and match_fingerprint() have.  With
+        # a snapshot, replacing the input images re-extracted and re-selected
+        # frames (their fingerprints carry max_frames, so they noticed) and
+        # then reused every descriptor and pair from the previous run, because
+        # those compared against the old frames' digest.  That is exactly how
+        # a 24-view run came back matching on 16 frames' worth of stale .npz
+        # files and SfM registered almost nothing.  Recording already re-reads
+        # it (below); doing the same on the way in is what keeps the two
+        # byte-identical, which is the invariant _stage_fingerprint() exists
+        # to protect.
+        fingerprint = _stage_fingerprint(cfg, key, _frames_digest(cfg))
         if not force and store.is_complete(key):
             stored = store.stage_record(key).get("fingerprint")
             if fingerprint is None or stored == fingerprint:
